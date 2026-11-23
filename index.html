@@ -809,28 +809,58 @@ function ask(t,p,yes,no){
     $('#dlgY').onclick=()=>done(true);$('#dlgN').onclick=()=>done(false);
   });
 }
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function pushNow(){ // 다른 저장이 진행 중이면 끝날 때까지 기다렸다가 저장
+  for(let i=0;i<10;i++){if(!cloudBusy)return await cloudPush();await sleep(300)}
+  return false;
+}
+// 닉네임을 계정에 선점. 이미 누가 쓰고 있으면 뒤에 숫자를 붙여 자동 변경.
+async function ensureNick(){
+  const m=window.MP;if(!m||!m.uid)return;
+  let v=S.nick;
+  for(let i=0;i<8;i++){
+    try{
+      await m.claimNick(v);
+      if(v!==S.nick){S.nick=v;save();toast('닉네임이 겹쳐서 \''+v+'\'(으)로 바꿨어요')}
+      return;
+    }catch(e){
+      const c=e&&e.code||e;
+      if(c!=='nick-taken'){console.warn('nick claim failed',c);return}
+      v=[...S.nick].slice(0,9).join('')+(100+Math.floor(Math.random()*900));
+    }
+  }
+}
+let authAgain=false;
 async function onAuth(){
   const m=window.MP,u=m&&m.user;
-  if(!m||m.state!=='ok'||authBusy||RELOADING)return;
+  if(!m||m.state!=='ok'||RELOADING)return;
+  if(authBusy){authAgain=true;return} // 처리 중에 들어온 로그인 변경을 버리지 않고 끝난 뒤 다시 처리
   authBusy=true;
   try{
     if(!u){if(S.uid){S.uid='';S.cloudTs=0;save()}return}
-    if(S.uid===u.uid){await cloudPull();mpSend(true);return}
+    if(S.uid===u.uid){await cloudPull();await ensureNick();mpSend(true);return}
     if(S.uid){ // 다른 계정 진행이 남아 있으면 비우고 처음부터 (서버에는 이전 계정 진행이 그대로 있음)
       RELOADING=true;try{localStorage.setItem(KEY,JSON.stringify(freshS()))}catch(e){}
       location.reload();return;
     }
+    // 여기부터: 게스트(이 기기) 진행 -> 로그인한 계정으로 이전
     const c=await m.loadSave();
     if(c){
       let useCloud=true;
       if(guestProgress())useCloud=await ask('이 계정에는 저장된 진행이 있어요','불러오면 이 기기의 게스트 진행은 사라져요.\n이 기기 진행으로 덮어쓰면 계정에 저장돼 있던 진행이 사라져요.','계정 진행 불러오기','이 기기 진행으로 덮어쓰기');
-      if(useCloud){adopt(c,u.uid);return}
+      if(useCloud&&adopt(c,u.uid))return;
     }
     S.uid=u.uid;S.cloudTs=0;
-    await cloudPush();mpSend(true);
-    toast(c?'이 기기 진행으로 저장했어요':'게스트 진행을 계정으로 옮겼어요');
+    await ensureNick();
+    save();
+    const ok=await pushNow();
+    mpSend(true);
+    toast(ok?(c?'이 기기 진행으로 저장했어요':'게스트 진행을 계정으로 옮겼어요'):'계정에 연결했어요. 서버 저장은 곧 다시 시도해요');
   }catch(e){toast('계정 정보를 불러오지 못했어요 ('+String(e&&e.code||e)+')')}
-  finally{authBusy=false;if(m.user)closeLogin();refreshAcct()}
+  finally{
+    authBusy=false;if(m.user)closeLogin();refreshAcct();
+    if(authAgain){authAgain=false;onAuth()}
+  }
 }
 async function doLogout(){
   const ok=await ask('로그아웃할까요?','이 계정의 진행 상황은 서버에 남아 있어요.\n이 기기는 새 게스트로 시작해요.','로그아웃','취소');
@@ -940,7 +970,21 @@ function renderSet(){
   const lo=$('#lgOpen');if(lo)lo.onclick=openLogin;
   const lt=$('#lgOut');if(lt)lt.onclick=doLogout;
   const sy=$('#syncs');if(sy)sy.textContent=syncText();
-  $('#nickOk').onclick=()=>{const v=$('#nick').value.trim().slice(0,12);if(!v){toast('닉네임을 입력해 주세요');return}S.nick=v;save();avPaint();mpSend(true);cloudPush();toast('저장했어요')};
+  $('#nickOk').onclick=async()=>{
+    const btn=$('#nickOk'),v=$('#nick').value.trim().slice(0,12);
+    if(!v){toast('닉네임을 입력해 주세요');return}
+    if(window.MP&&MP.uid){ // 로그인 계정: 서버에서 중복 확인 후 선점
+      btn.disabled=true;
+      try{await MP.claimNick(v)}
+      catch(e){
+        const c=e&&e.code||e;
+        toast(c==='nick-taken'?'이미 사용 중인 닉네임이에요':'닉네임을 확인하지 못했어요 ('+c+')');
+        btn.disabled=false;return;
+      }
+      btn.disabled=false;
+    }
+    S.nick=v;save();avPaint();mpSend(true);cloudPush();toast('저장했어요');
+  };
   $('#avPick').onclick=()=>$('#avFile').click();
   $('#avFile').onchange=async e=>{
     const f=e.target.files[0];e.target.value='';if(!f)return;
@@ -1092,8 +1136,17 @@ const MP=window.MP={state:FIREBASE_CONFIG.apiKey&&FIREBASE_CONFIG.projectId?'con
   set(s,e){this.state=s;this.err=e||'';dispatchEvent(new Event('mp-state'))}};
 let Au=null,Fs=null,auth=null,db=null,lastSent='',lastT=0;
 const fail=e=>{throw (e&&e.code)||(e&&e.message)||'unknown'};
+// 예전 버전이 남긴 Firebase 익명 세션 정리: 서버에 남은 익명 계정(랭킹/저장 문서 + Auth 계정)을 삭제.
+// 게스트 진행은 이 기기(localStorage)에 있으므로 로그인 시 계정으로 옮겨지고, 익명 계정은 필요 없음.
+let purging=Promise.resolve();
+async function purgeAnon(u){
+  for(const c of ['players','saves']){try{await Fs.deleteDoc(Fs.doc(db,c,u.uid))}catch(e){}}
+  try{await Au.deleteUser(u)}catch(e){try{await Au.signOut(auth)}catch(_){}}
+}
+const nickKey=n=>'n_'+encodeURIComponent([...String(n).normalize('NFKC').toLowerCase().replace(/\s+/g,'')].join(''));
 MP.login={
   async google(){
+    await purging;
     const p=new Au.GoogleAuthProvider();p.setCustomParameters({prompt:'select_account'});
     try{await Au.signInWithPopup(auth,p)}
     catch(e){
@@ -1101,13 +1154,27 @@ MP.login={
       fail(e);
     }
   },
-  async email(em,pw,signup){try{await(signup?Au.createUserWithEmailAndPassword(auth,em,pw):Au.signInWithEmailAndPassword(auth,em,pw))}catch(e){fail(e)}},
+  async email(em,pw,signup){await purging;try{await(signup?Au.createUserWithEmailAndPassword(auth,em,pw):Au.signInWithEmailAndPassword(auth,em,pw))}catch(e){fail(e)}},
   async reset(em){try{await Au.sendPasswordResetEmail(auth,em)}catch(e){fail(e)}},
   async out(){try{await Au.signOut(auth)}catch(e){fail(e)}}
 };
 // 계정별 클라우드 저장 (saves/{uid})
 MP.loadSave=async()=>{if(!MP.uid)return null;const s=await Fs.getDoc(Fs.doc(db,'saves',MP.uid));return s.exists()?s.data():null};
 MP.putSave=async o=>{if(!MP.uid)throw 'no-user';await Fs.setDoc(Fs.doc(db,'saves',MP.uid),{data:o.data,ts:o.ts,dev:o.dev,t:Fs.serverTimestamp()})};
+// 닉네임 중복 방지: nicks/{정규화된 닉네임} = {uid}. 트랜잭션으로 선점하고, 내 이전 닉네임은 해제.
+MP.claimNick=async nick=>{
+  if(!MP.uid)throw {code:'no-user'};
+  const uid=MP.uid,key=nickKey(nick),ref=Fs.doc(db,'nicks',key);
+  await Fs.runTransaction(db,async tx=>{
+    const s=await tx.get(ref);
+    if(s.exists()){if(s.data().uid!==uid)throw {code:'nick-taken'};return}
+    tx.set(ref,{uid,nick:String(nick).slice(0,12),t:Fs.serverTimestamp()});
+  });
+  try{
+    const q=await Fs.getDocs(Fs.query(Fs.collection(db,'nicks'),Fs.where('uid','==',uid)));
+    await Promise.all(q.docs.filter(d=>d.id!==key).map(d=>Fs.deleteDoc(d.ref)));
+  }catch(e){}
+};
 // 랭킹 (players/{uid}) - 로그인한 계정만 올라감
 MP.submit=async(p,force)=>{
   if(MP.state!=='ok'||!MP.uid)return;
@@ -1130,6 +1197,7 @@ if(MP.state==='connecting'){
       auth=Au.getAuth(app);db=Fs.getFirestore(app);
       Au.getRedirectResult(auth).catch(()=>{});
       Au.onAuthStateChanged(auth,u=>{
+        if(u&&u.isAnonymous)purging=purgeAnon(u);
         const r=u&&!u.isAnonymous?u:null;
         MP.user=r?{uid:r.uid,name:r.displayName||r.email||'',email:r.email||''}:null;
         MP.uid=r?r.uid:null;lastSent='';
