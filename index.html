@@ -131,7 +131,7 @@ input.inp:focus{border-color:var(--y)}
 #dlgc p{margin:0;color:var(--mut);font-size:13.5px;line-height:1.6;white-space:pre-line}
 .dlgb{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .dlgb .btn{min-height:48px;font-size:16px;border-radius:12px}
-#toast{position:absolute;left:50%;top:16%;transform:translate(-50%,0);background:rgba(34,39,48,.96);border:1px solid var(--line);border-radius:999px;padding:9px 18px;font-size:14px;white-space:nowrap;pointer-events:none;opacity:0;z-index:95;box-shadow:0 6px 18px rgba(0,0,0,.4)}
+#toast{position:absolute;left:50%;top:16%;transform:translate(-50%,0);background:rgba(34,39,48,.96);border:1px solid var(--line);border-radius:18px;padding:9px 18px;font-size:14px;line-height:1.4;width:max-content;max-width:88%;text-align:center;pointer-events:none;opacity:0;z-index:95;box-shadow:0 6px 18px rgba(0,0,0,.4)}
 #toast.show{animation:tp 2s ease-out}
 @keyframes tp{0%{opacity:0;transform:translate(-50%,10px)}12%{opacity:1;transform:translate(-50%,0)}80%{opacity:1}100%{opacity:0;transform:translate(-50%,-8px)}}
 .gain{position:absolute;left:66px;top:6px;color:var(--y);font:400 17px 'Black Han Sans',sans-serif;text-shadow:0 2px 0 #000;pointer-events:none;animation:gup .9s ease-out forwards;z-index:5}
@@ -210,7 +210,7 @@ input.inp:focus{border-color:var(--y)}
       <div class="lglinks"><button type="button" id="lgReset">비밀번호 찾기</button><button type="button" id="lgBack">뒤로</button></div>
     </form>
   </div>
-  <div id="dlg" class="off"><div id="dlgc"><b id="dlgT"></b><p id="dlgP"></p><div class="dlgb"><button class="btn y" id="dlgY"></button><button class="btn u" id="dlgN"></button></div></div></div>
+  <div id="dlg" class="off"><div id="dlgc"><b id="dlgT"></b><p id="dlgP"></p><input class="inp off" id="dlgIn" autocomplete="off"><div class="dlgb"><button class="btn y" id="dlgY"></button><button class="btn u" id="dlgN"></button></div></div></div>
   <div id="toast"></div>
 </div>
 
@@ -645,7 +645,7 @@ async function avFromFile(f){
   }finally{URL.revokeObjectURL(url)}
 }
 let rkOff=null;
-function mpSend(f){if(window.MP)MP.submit({nick:S.nick,score:lvSum(),best:S.best,tracks:S.tr.length,av:S.av||''},f)}
+function mpSend(f){return window.MP?MP.submit({nick:S.nick,score:lvSum(),best:S.best,tracks:S.tr.length,av:S.av||''},f):Promise.resolve(false)}
 let rkRaf=0,rkCars=[],rkDir=1.5;
 const lvSum=()=>S.tr.reduce((a,t)=>a+t.cars.reduce((b,c)=>b+c.l,0),0);
 const RKLN=4,RKL=64,RKP=14,RKH=RKP*2+RKL*RKLN,RKSC=2.7;
@@ -756,7 +756,8 @@ function renderRank(){
   if(m.state==='nocfg')return msg('Firebase 설정을 넣으면 랭킹이 열려요');
   if(m.state==='err')return msg('연결에 실패했어요<br>'+esc(m.err||''));
   el.innerHTML='<canvas id="rkcv"></canvas><div id="rkg"></div><p class="t" id="rkn">불러오는 중…</p><div id="rkl"></div>';
-  rkCars=[];rkDir=1.5;rkStart($('#rkcv'));mpSend(true);rkBanner();
+  rkCars=[];rkDir=1.5;rkStart($('#rkcv'));rkBanner();
+  mpSend().then(w=>{if(w&&rkOff&&rkOff.refresh)rkOff.refresh()}); // 내 기록이 실제로 올라갔을 때만 랭킹 다시 받기
   rkOff=m.watch(rows=>{
     if(tab!=='rank')return;
     rkSync(rows);
@@ -801,12 +802,21 @@ async function cloudPull(){ // 다른 기기에서 더 최근에 저장했다면
     else await cloudPush();
   }catch(e){cloudErr=String(e&&e.code||e)}
 }
-function ask(t,p,yes,no){
+function ask(t,p,yes,no,inp){ // inp 있으면 입력칸 표시: 확인 시 입력값(문자열) 반환, 취소 시 false
   return new Promise(res=>{
     $('#dlgT').textContent=t;$('#dlgP').textContent=p;$('#dlgY').textContent=yes;$('#dlgN').textContent=no;
+    const ie=$('#dlgIn');ie.value='';ie.classList.toggle('off',!inp);
+    if(inp){ie.type=inp.type||'text';ie.placeholder=inp.ph||'';ie.autocomplete=ie.type==='password'?'current-password':'off'}
     const el=$('#dlg');el.classList.remove('off');
-    const done=v=>{el.classList.add('off');res(v)};
-    $('#dlgY').onclick=()=>done(true);$('#dlgN').onclick=()=>done(false);
+    const done=v=>{el.classList.add('off');ie.classList.add('off');ie.value='';res(v)};
+    $('#dlgY').onclick=()=>{
+      if(!inp)return done(true);
+      const v=ie.value;
+      if(inp.must&&v.trim()!==inp.must){toast('\''+inp.must+'\'을(를) 정확히 입력해 주세요');return}
+      if(!v)return;
+      done(v);
+    };
+    $('#dlgN').onclick=()=>done(false);
   });
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -871,13 +881,30 @@ async function doLogout(){
   try{await MP.login.out()}catch(e){}
   location.reload();
 }
+async function doDeleteAccount(){
+  const m=window.MP;if(!m||!m.user||RELOADING)return;
+  const ok=await ask('정말 탈퇴할까요?','계정, 서버에 저장된 진행 상황, 랭킹 기록, 프로필 사진, 닉네임이 모두 삭제되고 되돌릴 수 없어요.\n이 기기의 진행도 새로 시작돼요.\n계속하려면 아래에 \'탈퇴\'를 입력해 주세요.','탈퇴하기','취소',{ph:'탈퇴',must:'탈퇴'});
+  if(!ok)return;
+  RELOADING=true; // 삭제 중에는 저장/랭킹 전송 중지
+  try{
+    await m.deleteAccount(()=>ask('비밀번호를 확인해요','보안을 위해 비밀번호를 한 번 더 입력해 주세요.','확인','취소',{type:'password',ph:'비밀번호'}));
+  }catch(e){
+    RELOADING=false;
+    const c=String(e&&e.code||e);
+    if(!['cancelled','auth/popup-closed-by-user','auth/cancelled-popup-request'].includes(c))
+      toast(c.startsWith('auth/')?(authMsg(c)||'탈퇴하지 못했어요'):'탈퇴하지 못했어요 ('+c+')');
+    return;
+  }
+  try{localStorage.setItem(KEY,JSON.stringify(freshS()))}catch(e){}
+  location.reload();
+}
 function refreshAcct(){if(tab==='rank')renderRank();else if(tab==='set')renderSet()}
 
 // ===== 로그인 화면 =====
 let lgRaf=0,lgMode='in';
 function lgStart(){
   cancelAnimationFrame(lgRaf);
-  const cv=$('#lgcv'),g=cv.getContext('2d'),LV=[2,4,8,12,16,19,20,10,6,14],H=170;
+  const cv=$('#lgcv'),g=cv.getContext('2d'),LV=[1,2,3],H=170;
   let W=0,last=0,init=false;
   const mk=(i,x)=>({lane:i,x,v:130+i*40+Math.random()*50,l:LV[(Math.random()*LV.length)|0]});
   const cars=[mk(0,.15),mk(1,.55),mk(2,.9)];
@@ -923,6 +950,15 @@ const authMsg=c=>({
   'auth/missing-password':'비밀번호를 입력해 주세요',
   'auth/weak-password':'비밀번호는 6자 이상이어야 해요',
   'auth/email-already-in-use':'이미 가입된 이메일이에요',
+  'auth/account-exists-with-different-credential':'같은 이메일로 다른 방식(구글/이메일)으로 가입돼 있어요. 가입했던 방식으로 로그인해 주세요',
+  'auth/credential-already-in-use':'이미 다른 계정에 연결된 로그인 정보예요',
+  'auth/user-disabled':'사용이 중지된 계정이에요',
+  'auth/user-mismatch':'현재 로그인한 계정과 다른 계정이에요',
+  'auth/requires-recent-login':'보안을 위해 다시 로그인한 뒤 시도해 주세요',
+  'auth/popup-blocked':'팝업이 차단됐어요. 팝업을 허용해 주세요',
+  'auth/operation-not-supported-in-this-environment':'이 브라우저에서는 구글 로그인을 쓸 수 없어요. 크롬이나 사파리에서 열어 주세요',
+  'auth/web-storage-unsupported':'브라우저 저장소가 막혀 있어요. 사생활 보호 모드나 쿠키 차단을 확인해 주세요',
+  'auth/missing-email':'이메일을 입력해 주세요',
   'auth/invalid-credential':'이메일 또는 비밀번호가 맞지 않아요',
   'auth/wrong-password':'이메일 또는 비밀번호가 맞지 않아요',
   'auth/user-not-found':'이메일 또는 비밀번호가 맞지 않아요',
@@ -939,13 +975,20 @@ $('#lgTabIn').onclick=()=>lgSetMode('in');$('#lgTabUp').onclick=()=>lgSetMode('u
 $('#lgEmail').onsubmit=async e=>{
   e.preventDefault();const em=$('#lgMail').value.trim(),pw=$('#lgPw').value;
   if(!em||!pw){lgErr('이메일과 비밀번호를 입력해 주세요');return}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){lgErr(authMsg('auth/invalid-email'));return}
+  if(lgMode==='up'&&pw.length<6){lgErr(authMsg('auth/weak-password'));return}
   lgErr('');lgBusy(true);
-  try{await MP.login.email(em,pw,lgMode==='up')}catch(err){lgErr(authMsg(err))}
+  try{await MP.login.email(em,pw,lgMode==='up')}
+  catch(err){
+    if(err==='auth/email-already-in-use'){lgSetMode('in');lgErr('이미 가입된 이메일이에요. 비밀번호를 입력해 로그인해 주세요')}
+    else lgErr(authMsg(err));
+  }
   lgBusy(false);
 };
 $('#lgReset').onclick=async()=>{
   const em=$('#lgMail').value.trim();if(!em){lgErr('이메일을 먼저 입력해 주세요');return}
-  try{await MP.login.reset(em);lgErr('비밀번호 재설정 메일을 보냈어요',true)}catch(err){lgErr(authMsg(err))}
+  try{await MP.login.reset(em);lgErr('비밀번호 재설정 메일을 보냈어요',true)}
+  catch(err){if(err==='auth/user-not-found')lgErr('가입된 이메일이면 재설정 메일이 도착해요',true);else lgErr(authMsg(err))}
 };
 
 // ===== 랭킹 안내 / 설정 탭 =====
@@ -961,7 +1004,7 @@ function acctHtml(){
   if(m.state==='nocfg')return box('Firebase 설정이 필요해요');
   if(m.state==='err')return box('연결에 실패했어요 '+esc(m.err||''));
   if(!u)return `<div class="acct">${avHtml('guest',S.nick,S.av)}<div class="ai"><b>게스트</b><span>로그인하면 랭킹에 참여하고, 다른 기기에서 이어서 할 수 있어요</span></div></div><button class="btn y" id="lgOpen" style="width:100%;margin-top:10px">로그인 / 회원가입</button>`;
-  return `<div class="acct">${avHtml(u.uid,S.nick,S.av)}<div class="ai"><b>${esc(u.name||'내 계정')}</b><span id="syncs"></span></div></div><button class="btn u" id="lgOut" style="width:100%;margin-top:10px">로그아웃</button>`;
+  return `<div class="acct">${avHtml(u.uid,S.nick,S.av)}<div class="ai"><b>${esc(u.name||'내 계정')}</b><span id="syncs"></span></div></div><button class="btn u" id="lgOut" style="width:100%;margin-top:10px">로그아웃</button><button class="lgg" id="acDel" style="display:block;margin:6px auto 0">회원 탈퇴</button>`;
 }
 function renderSet(){
   $('#shT').textContent='설정';
@@ -969,6 +1012,7 @@ function renderSet(){
   avPaint();
   const lo=$('#lgOpen');if(lo)lo.onclick=openLogin;
   const lt=$('#lgOut');if(lt)lt.onclick=doLogout;
+  const ad=$('#acDel');if(ad)ad.onclick=doDeleteAccount;
   const sy=$('#syncs');if(sy)sy.textContent=syncText();
   $('#nickOk').onclick=async()=>{
     const btn=$('#nickOk'),v=$('#nick').value.trim().slice(0,12);
@@ -998,6 +1042,7 @@ addEventListener('mp-state',()=>{
   if(tab==='rank')renderRank();else if(tab==='set')renderSet();
 });
 addEventListener('mp-auth',()=>{onAuth()});
+addEventListener('mp-autherr',e=>{const t=authMsg(e.detail);if(t)toast(t)}); // 구글 리다이렉트 로그인 실패 안내
 // ===== 새 차 연출 =====
 let rvT=0;
 function showReveal(l){
@@ -1116,7 +1161,7 @@ function loop(t){
 dpr=Math.min(2,window.devicePixelRatio||1);
 S.tr.forEach((_,i)=>addCard(i));renderLock();
 new ResizeObserver(()=>R.forEach(sizeR)).observe(list);
-ui();setInterval(ui,250);setInterval(save,5000);setInterval(()=>mpSend(),20000);setInterval(()=>{if(!document.hidden)cloudPush()},30000);
+ui();setInterval(ui,250);setInterval(save,5000);setInterval(()=>mpSend(),30000);setInterval(()=>{if(!document.hidden)cloudPush()},30000);
 addEventListener('visibilitychange',()=>{if(document.hidden){save();cloudPush()}else cloudPull()});
 requestAnimationFrame(loop);
 if(S.pend>=1)setTimeout(showOffline,500);
@@ -1175,19 +1220,94 @@ MP.claimNick=async nick=>{
     await Promise.all(q.docs.filter(d=>d.id!==key).map(d=>Fs.deleteDoc(d.ref)));
   }catch(e){}
 };
-// 랭킹 (players/{uid}) - 로그인한 계정만 올라감
+// ===== 랭킹 =====
+// players/{uid}: 점수 등 작은 문서만. 프로필 사진은 avatars/{uid}에 따로 두고, 바뀐 것만 올리고/받음.
+const avHash=s=>{if(!s)return '';let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))>>>0;return h.toString(36)+s.length.toString(36)};
+let lastAh=null; // 이 세션에서 서버에 올린 사진 해시 (null = 아직 모름)
 MP.submit=async(p,force)=>{
-  if(MP.state!=='ok'||!MP.uid)return;
+  if(MP.state!=='ok'||!MP.uid)return false;
   const k=JSON.stringify(p),now=Date.now();
-  if(!force&&(k===lastSent||now-lastT<15000))return;
+  if(!force&&(k===lastSent||now-lastT<30000))return false; // 바뀐 게 있을 때만, 30초 간격으로
   lastT=now;
-  try{await Fs.setDoc(Fs.doc(db,'players',MP.uid),{nick:String(p.nick).slice(0,12),score:Math.round(+p.score)||0,best:+p.best||1,tracks:+p.tracks||1,av:typeof p.av==='string'?p.av.slice(0,6000):'',t:Fs.serverTimestamp()});lastSent=k;MP.err=''}
-  catch(e){MP.err=e.code||e.message}
+  const uid=MP.uid,av=typeof p.av==='string'?p.av.slice(0,6000):'';
+  let ah=avHash(av),ok=true;
+  try{
+    if(ah&&ah!==lastAh){
+      try{await Fs.setDoc(Fs.doc(db,'avatars',uid),{d:av,h:ah,t:Fs.serverTimestamp()});lastAh=ah}
+      catch(e){ah=lastAh||'';ok=false}
+    }else if(!ah&&lastAh){
+      try{await Fs.deleteDoc(Fs.doc(db,'avatars',uid));lastAh=''}
+      catch(e){ah=lastAh;ok=false}
+    }
+    await Fs.setDoc(Fs.doc(db,'players',uid),{nick:String(p.nick).slice(0,12),score:Math.round(+p.score)||0,best:+p.best||1,tracks:+p.tracks||1,ah,t:Fs.serverTimestamp()});
+    lastSent=ok?k:'';MP.err='';return true;
+  }catch(e){MP.err=e.code||e.message;return false}
 };
+// 랭킹 조회: 30초마다 한 번, 결과가 이전과 달라졌을 때만 화면에 알림. 결과는 캐시(탭을 다시 열어도 30초 안이면 재조회 안 함).
+const RK={rows:[],sig:'',t:0,av:new Map(),busy:null};
+function loadRank(){
+  if(RK.busy)return RK.busy;
+  RK.busy=(async()=>{
+    try{
+      await null;
+      const s=await Fs.getDocs(Fs.query(Fs.collection(db,'players'),Fs.orderBy('score','desc'),Fs.limit(50)));
+      const rows=s.docs.map(d=>{const x=d.data();return{id:d.id,nick:x.nick,score:x.score,best:x.best,tracks:x.tracks,ah:x.ah||'',old:typeof x.av==='string'?x.av:''}});
+      const ahOf=new Map(rows.map(r=>[r.id,r.ah]));
+      const need=rows.filter(r=>r.ah&&(RK.av.get(r.id)||{}).h!==r.ah).map(r=>r.id); // 사진이 바뀌었거나 처음 보는 사람만
+      for(let i=0;i<need.length;i+=30){
+        try{
+          const q=await Fs.getDocs(Fs.query(Fs.collection(db,'avatars'),Fs.where(Fs.documentId(),'in',need.slice(i,i+30))));
+          q.docs.forEach(d=>RK.av.set(d.id,{h:ahOf.get(d.id),d:String(d.data().d||'')}));
+        }catch(e){}
+      }
+      if(RK.av.size>200){const keep=new Set(rows.map(r=>r.id));for(const k of [...RK.av.keys()]){if(RK.av.size<=120)break;if(!keep.has(k))RK.av.delete(k)}}
+      rows.forEach(r=>{const a=RK.av.get(r.id);r.av=r.ah?(a?a.d:''):r.old;delete r.old}); // 예전 방식(players.av)도 임시로 표시
+      const sig=JSON.stringify(rows.map(r=>[r.id,r.nick,r.score,r.best,r.tracks,r.ah,(r.av||'').length]));
+      RK.rows=rows;RK.sig=sig;RK.t=Date.now();
+    }finally{RK.busy=null}
+  })();
+  return RK.busy;
+}
 MP.watch=(cb,errCb)=>{
   if(MP.state!=='ok')return()=>{};
-  const q=Fs.query(Fs.collection(db,'players'),Fs.orderBy('score','desc'),Fs.limit(50));
-  return Fs.onSnapshot(q,s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),e=>errCb&&errCb(e.code||e.message));
+  let last='',alive=true;
+  const emit=()=>{if(alive&&RK.t&&RK.sig!==last){last=RK.sig;cb(RK.rows)}};
+  const pull=async force=>{
+    if(!alive)return;
+    if(!force&&RK.t&&Date.now()-RK.t<28000)return emit();
+    try{await loadRank();emit()}
+    catch(e){if(RK.t)emit();else errCb&&errCb(e.code||e.message)}
+  };
+  pull();
+  const tm=setInterval(()=>{if(!document.hidden)pull()},30000);
+  const stop=()=>{alive=false;clearInterval(tm)};
+  stop.refresh=()=>pull(true);
+  return stop;
+};
+// ===== 회원 탈퇴: 서버 데이터(랭킹/사진/저장/닉네임) 삭제 후 계정 삭제. 오래된 로그인이면 먼저 재인증 =====
+MP.deleteAccount=async askPw=>{
+  const u=auth.currentUser;
+  if(!u||u.isAnonymous||u.uid!==MP.uid)throw {code:'no-user'};
+  const uid=u.uid,ids=u.providerData.map(x=>x.providerId);
+  const recent=Date.now()-Date.parse(u.metadata.lastSignInTime||'')<120000;
+  if(!recent){
+    try{
+      if(ids.includes('google.com')){const gp=new Au.GoogleAuthProvider();gp.setCustomParameters({prompt:'select_account'});await Au.reauthenticateWithPopup(u,gp)}
+      else if(ids.includes('password')){
+        const pw=await askPw();if(!pw)throw {code:'cancelled'};
+        await Au.reauthenticateWithCredential(u,Au.EmailAuthProvider.credential(u.email,pw));
+      }
+    }catch(e){fail(e)}
+  }
+  try{
+    await Fs.deleteDoc(Fs.doc(db,'players',uid));
+    await Fs.deleteDoc(Fs.doc(db,'avatars',uid));
+    await Fs.deleteDoc(Fs.doc(db,'saves',uid));
+    const q=await Fs.getDocs(Fs.query(Fs.collection(db,'nicks'),Fs.where('uid','==',uid)));
+    await Promise.all(q.docs.map(d=>Fs.deleteDoc(d.ref)));
+  }catch(e){fail(e)}
+  RK.t=0;
+  try{await Au.deleteUser(u)}catch(e){fail(e)}
 };
 if(MP.state==='connecting'){
   (async()=>{
@@ -1195,12 +1315,12 @@ if(MP.state==='connecting'){
       let A;[A,Au,Fs]=await Promise.all([import(B+'firebase-app.js'),import(B+'firebase-auth.js'),import(B+'firebase-firestore.js')]);
       const app=A.initializeApp(FIREBASE_CONFIG);
       auth=Au.getAuth(app);db=Fs.getFirestore(app);
-      Au.getRedirectResult(auth).catch(()=>{});
+      Au.getRedirectResult(auth).catch(e=>dispatchEvent(new CustomEvent('mp-autherr',{detail:e.code||e.message})));
       Au.onAuthStateChanged(auth,u=>{
         if(u&&u.isAnonymous)purging=purgeAnon(u);
         const r=u&&!u.isAnonymous?u:null;
         MP.user=r?{uid:r.uid,name:r.displayName||r.email||'',email:r.email||''}:null;
-        MP.uid=r?r.uid:null;lastSent='';
+        MP.uid=r?r.uid:null;lastSent='';lastAh=null;RK.t=0;
         if(MP.state!=='ok')MP.set('ok');
         dispatchEvent(new Event('mp-auth'));
       },e=>MP.set('err',e.code||e.message));
