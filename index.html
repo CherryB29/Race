@@ -42,9 +42,11 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:700 15
 .cf .btn small{font-size:11px}
 .cf .btn.u{grid-column:1/-1;height:38px;min-height:0;clip-path:none;flex-direction:row;justify-content:flex-start;gap:10px;padding:0 12px;border:1px solid var(--line);background:var(--bg);border-radius:6px;font-size:14px}
 .btn.u{--bg:#1b1f26;--fg:#d6dae1}
-.ul{font:800 15px 'Noto Sans KR',sans-serif}
-.uc{display:flex;gap:10px;flex:1;font:700 12px 'Noto Sans KR',sans-serif}
-.uc i{font-style:normal}
+.ul{font:800 15px 'Noto Sans KR',sans-serif;white-space:nowrap;flex:none}
+.uc{display:flex;flex-wrap:nowrap;gap:10px;flex:1;min-width:0;overflow:hidden;white-space:nowrap;font:700 12px 'Noto Sans KR',sans-serif}
+.uc i{font-style:normal;flex:none}
+.cost{white-space:nowrap;flex:none}
+@media(max-width:400px){.cf .btn.u{gap:6px;padding:0 8px}.ul{font-size:13px}.ul svg{margin-right:3px}.uc{gap:6px;font-size:11px}.cost{font-size:12px;padding:3px 6px}.vd{display:none}}
 .vd{width:1px;height:16px;background:#4a5160;flex:none}
 .cost{margin-left:auto;font:700 13px 'Noto Sans KR',sans-serif;color:var(--y);background:#000;border:1px solid var(--y);border-radius:6px;padding:3px 9px}
 .cf .btn.u:not(:disabled){border-color:#8a7414;--bg:#262c37}
@@ -248,7 +250,7 @@ input.rg::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#
 
 <script>
 // ===== 밸런스 (여기 숫자만 바꾸면 템포가 바뀝니다) =====
-const CFG={lap:10,need:3,vMul:3.3,maxLvl:20,drive:.9,bounce:2.2,hitDiv:1.7,buyDiv:1.4,slots:6,slotEvery:3,slotMax:9,baseP:8,pGrow:1.09,lvP:5,trackM:2.5,unlock:350,unlockG:6,upC:30,boostT:3,slowT:2.5,boostX:2.4,upG:2.8,upM:1.18,spdM:1.06,spdEvery:2,off:.2,maxTracks:12};
+const CFG={lap:10,need:3,vMul:3.3,maxLvl:20,drive:.9,bounce:2.2,hitDiv:1.7,slots:6,slotEvery:3/1.4,slotMax:11,baseP:8,pGrow:1.09,lvP:5,trackM:2.5,unlock:350,unlockG:6,upC:30,boostT:3,slowT:2.5,boostX:2.4,upG:2.8,upM:1.18,spdM:1.06,spdEvery:2,off:.2,maxTracks:12};
 const TH={
   asphalt:{bg:'#1b1f26',road:'#363c47',edge:'#cfd3da',line:'#fff',skid:'0,0,0'},
   neon:{bg:'#0f0b24',road:'#1b1440',edge:'#5b4de0',line:'#fff',skid:'150,130,255'},
@@ -258,28 +260,62 @@ const TH={
 // 서킷마다 다른 모양 (0~1 정규화 좌표)
 const sg=Math.sign,ab=Math.abs,pw=Math.pow,PI2=Math.PI*2;
 const SHP=(()=>{
-  const SQ=280,WD=170;
-  // 가로로 넓은 틀(카드 폭 사용) / 정사각형 틀(가운데 배치): 트랙마다 틀 크기가 다름
+  const SQ=280,MD=220,WD=170,MG=24;
   const wide=f=>({h:WD,g:(W,H)=>{const P=[];for(let k=0;k<160;k++){const q=f(k/160*PI2);P.push([q[0]*W,q[1]*H])}return P}});
   const sqr=f=>({h:SQ,g:(W,H)=>{const P=[];for(let k=0;k<160;k++){const q=f(k/160*PI2);P.push([W/2+(q[0]-.5)*H,q[1]*H])}return P}});
-  const sq=t=>{const c=Math.cos(t),n=Math.sin(t);return[sg(c)*pw(ab(c),.4),sg(n)*pw(ab(n),.4)]};
   const pol=(f,k)=>t=>{const r=f(t);return[.5+k*r*Math.cos(t),.5+k*r*Math.sin(t)]};
-  const pn=t=>.45+.55*Math.cos(t)*Math.cos(t);
+  const sq=t=>{const c=Math.cos(t),n=Math.sin(t);return[sg(c)*pw(ab(c),.4),sg(n)*pw(ab(n),.4)]};
+  // 비율 유지형 틀: 모양을 아무 단위로 만들면 틀(W×h) 안에 여백을 두고 꽉 차게 맞춰줌
+  const fit=(P,W,H)=>{let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const p of P){x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1])}
+    const s=Math.min((W-2*MG)/((x1-x0)||1),(H-2*MG)/((y1-y0)||1)),cx=(x0+x1)/2,cy=(y0+y1)/2;
+    return P.map(p=>[W/2+(p[0]-cx)*s,H/2+(p[1]-cy)*s])};
+  const fr=(h,mk)=>({h,g:(W,H)=>fit(mk(),W,H)});
+  const cv=(n,f)=>{const P=[];for(let k=0;k<n;k++)P.push(f(k/n*PI2));return P};
+  // 모서리 둥근 다각형 (오목한 모서리도 OK), 시계 방향
+  const rpoly=(V,R)=>{const n=V.length,P=[];
+    for(let i=0;i<n;i++){
+      const p=V[(i+n-1)%n],v=V[i],q=V[(i+1)%n];
+      let ax=p[0]-v[0],ay=p[1]-v[1],bx=q[0]-v[0],by=q[1]-v[1];
+      const la=Math.hypot(ax,ay),lb=Math.hypot(bx,by);ax/=la;ay/=la;bx/=lb;by/=lb;
+      const th=Math.acos(Math.max(-1,Math.min(1,ax*bx+ay*by))),t=Math.tan(th/2);
+      let r=R,d=r/t;const dm=.5*Math.min(la,lb);if(d>dm){d=dm;r=d*t}
+      let mx=ax+bx,my=ay+by;const lm=Math.hypot(mx,my);mx/=lm;my/=lm;
+      const k=r/Math.sin(th/2),c=[v[0]+mx*k,v[1]+my*k];
+      const a1=Math.atan2(v[1]+ay*d-c[1],v[0]+ax*d-c[0]),a2=Math.atan2(v[1]+by*d-c[1],v[0]+bx*d-c[0]);
+      let da=a2-a1;while(da>Math.PI)da-=PI2;while(da<-Math.PI)da+=PI2;
+      const seg=Math.max(4,Math.ceil(ab(da)*8));
+      for(let j=0;j<=seg;j++){const a=a1+da*j/seg;P.push([c[0]+r*Math.cos(a),c[1]+r*Math.sin(a)])}
+    }return P};
+  const ngon=(n,rot)=>cv(n,t=>[Math.cos(rot+t),Math.sin(rot+t)]);
+  // 곡선을 등간격으로 다시 찍고 이동평균으로 뾰족한 곳을 둥글게
+  const smooth=(P,w,ps)=>{const n=P.length;const c=[0];for(let k=1;k<=n;k++){const a=P[k-1],b=P[k%n];c.push(c[k-1]+Math.hypot(b[0]-a[0],b[1]-a[1]))}
+    const M=240,L=c[n];let Q=[],k=0;for(let j=0;j<M;j++){const tg=j*L/M;while(c[k+1]<tg)k++;const a=P[k],b=P[(k+1)%n],t=(tg-c[k])/((c[k+1]-c[k])||1);Q.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t])}
+    for(let s=0;s<ps;s++){const R=[];for(let j=0;j<M;j++){let x=0,y=0;for(let q=-w;q<=w;q++){const p=Q[(j+q+M)%M];x+=p[0];y+=p[1]}R.push([x/(2*w+1),y/(2*w+1)])}Q=R}return Q};
+  // 둥근 덩어리(메타볼): 원 여러 개를 부드럽게 이어 붙인 외곽선
+  const blob=(S,T,O)=>{const F=(x,y)=>S.reduce((s,c)=>s+c[2]*c[2]/(((x-c[0])**2+(y-c[1])**2)||1e-9),0);
+    return cv(180,t=>{const dx=Math.cos(t),dy=Math.sin(t);let a=0;while(F(O[0]+dx*(a+.02),O[1]+dy*(a+.02))>=T&&a<6)a+=.02;let b=a+.02;for(let i=0;i<24;i++){const m=(a+b)/2;if(F(O[0]+dx*m,O[1]+dy*m)>=T)a=m;else b=m}return[O[0]+dx*a,O[1]+dy*a]})};
   return[
-    {h:WD,g:(W,H,rw)=>rrect(W,H,rw,.14,.15)},                                                        // 둥근 직사각
+    {h:WD,g:(W,H,rw)=>rrect(W,H,rw,.14,.15)},                                                        // 둥근 직사각 (직사각 틀)
     wide(t=>[.5+.38*Math.cos(t),.5+.28*Math.sin(2*t)]),                                              // 8자(다리)
     sqr(t=>[.5+.412*Math.cos(t),.5+.412*Math.sin(t)]),                                               // 원
     sqr(pol(t=>1+.2*Math.cos(5*t),.3433)),                                                           // 별
     wide(t=>{const c=Math.cos(t),n=Math.sin(t);return[.5+.36*sg(c)*pw(ab(c),.8),.5+.3*sg(n)*pw(ab(n),.8)]}), // 가로 타원
     sqr(pol(t=>1+.2*Math.cos(4*t),.3433)),                                                           // 네잎 클로버
-    wide(t=>{const c=Math.cos(t),n=Math.sin(t);return[.5+.36*sg(c)*pw(ab(c),.8),.5+.36*sg(n)*pw(ab(n),.8)*(1+.25*c)]}),                           // 달걀
+    fr(SQ,()=>cv(160,t=>{const c=Math.cos(t);return[.78*Math.sin(t)*(1-.17*c),-c]})),                // 달걀 (정사각 틀, 세로)
     sqr(pol(t=>1+.3*Math.cos(3*t),.3169)),                                                           // 둥근 삼각
-    wide(t=>[.5+.37*Math.cos(t),.5+.45*Math.sin(t)*pn(t)]),                                          // 땅콩
+    fr(MD,()=>blob([[-.7,0,.62],[.7,0,.62]],1.4,[0,0])),                                             // 땅콩 (가로로 긴 틀)
     sqr(pol(t=>1+.11*Math.cos(6*t),.371)),                                                           // 톱니
-    wide(t=>[.5+.36*Math.cos(t),.5+.35*Math.sin(t)+.06*(.5-Math.cos(t)*Math.cos(t))]),                              // 콩
-    sqr(t=>{const q=sq(t);return[.5+.3347*(q[0]-q[1])*.7071,.5+.3347*(q[0]+q[1])*.7071]})            // 마름모
+    fr(MD,()=>blob([[-1,.28,.5],[0,0,.58],[1,.28,.5]],1.25,[0,-.1])),                                // 콩 (가로로 긴 틀)
+    sqr(t=>{const q=sq(t);return[.5+.3347*(q[0]-q[1])*.7071,.5+.3347*(q[0]+q[1])*.7071]}),           // 마름모
+    fr(SQ,()=>smooth(cv(480,t=>[16*pw(Math.sin(t),3),-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))]),10,4)), // 하트
+    fr(SQ,()=>rpoly(ngon(3,-Math.PI/2),.2)),                                                         // 삼각형
+    fr(250,()=>rpoly(ngon(6,0),.3)),                                                                  // 육각형
+    fr(SQ,()=>rpoly(ngon(5,-Math.PI/2),.35)),                                                        // 오각형
+    fr(SQ,()=>rpoly([[1,-3.4],[1,-1],[3.4,-1],[3.4,1],[1,1],[1,3.4],[-1,3.4],[-1,1],[-3.4,1],[-3.4,-1],[-1,-1],[-1,-3.4]],.8)), // 십자가
+    fr(SQ,()=>smooth(cv(480,t=>[.8*Math.sin(t)*Math.sin(t/2),-Math.cos(t)]),10,4))                    // 물방울
   ];
 })();
+CFG.maxTracks=SHP.length; // 모양 개수만큼 서킷 확장
 
 // ===== 상태 / 저장 =====
 const $=s=>document.querySelector(s);
@@ -290,7 +326,7 @@ const freshS=()=>({money:12,tr:[newTrack()],own:{col:['#ff4d6d','#ffb703'],body:
 let S=freshS(),RELOADING=false;
 const KEY='circuit-tycoon-v2';
 let offMsg='';
-try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&r.tr&&r.tr.length){S=Object.assign(S,r);const dt=Math.min(7200,(Date.now()-r.t)/1000),g=(r.ips||0)*dt*CFG.off;if(g>=1&&dt>30){S.pend=(S.pend||0)+g}}}catch(e){}
+try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&r.tr&&r.tr.length){S=Object.assign(S,r);const dt=Math.min(10800,(Date.now()-r.t)/1000),g=(r.ips||0)*dt*CFG.off;if(g>=1&&dt>30){S.pend=(S.pend||0)+g}}}catch(e){}
 S.sel={theme:'asphalt'};
 if(!S.nick)S.nick='레이서'+(1000+Math.floor(Math.random()*9000));
 function save(){if(RELOADING)return;try{S.t=Date.now();localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
@@ -312,7 +348,7 @@ function spawnL(i){
   for(let l=1;l<b;l++){const k=n[l]||0;if(k===CFG.need-1)return l;if(!alt&&k>0&&k<CFG.need)alt=l}
   return alt||b;
 }
-const price=i=>Math.ceil(CFG.baseP*pw(CFG.lvP,spawnL(i)-1)*pw(CFG.pGrow,S.tr[i].bought)*tm(i)/CFG.buyDiv);
+const price=i=>Math.ceil(CFG.baseP*pw(CFG.lvP,spawnL(i)-1)*pw(CFG.pGrow,S.tr[i].bought)*tm(i));
 const upCost=i=>Math.ceil(CFG.upC*pw(CFG.upG,S.tr[i].up)*tm(i));
 const unlockCost=()=>Math.ceil(CFG.unlock*pw(CFG.unlockG,S.tr.length-1));
 function mergeL(i){const n={};S.tr[i].cars.forEach(c=>n[c.l]=(n[c.l]||0)+1);for(let l=1;l<CFG.maxLvl;l++)if(n[l]>=CFG.need)return l;return 0}
