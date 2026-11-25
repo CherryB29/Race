@@ -188,6 +188,7 @@ input.inp:focus{border-color:var(--y)}
 .mt.mo{color:var(--mut)}
 .mt.mo .wv{opacity:0}
 .mt.mo .sl{stroke-dashoffset:0}
+.vl{font:700 12px 'Noto Sans KR',sans-serif;color:var(--mut);margin:0 0 2px 2px}
 .vol.mu input,.vol.mu b{opacity:.4}
 .vol{display:flex;align-items:center;gap:12px;transition:opacity .2s}
 .vol b{min-width:44px;text-align:right;color:var(--y);font:800 17px 'Noto Sans KR',sans-serif}
@@ -322,7 +323,7 @@ const $=s=>document.querySelector(s);
 const fmt=n=>{if(n<10)return String(Math.round(n*10)/10);n=Math.floor(n);if(n<10000)return n.toLocaleString('ko-KR');const u=['','만','억','조','경','해'];let i=0,x=n;while(x>=10000&&i<5){x/=10000;i++}let s=x>=100?x.toFixed(0):x>=10?x.toFixed(1):x.toFixed(2);if(s.includes('.'))s=s.replace(/\.?0+$/,'');return s+u[i]};
 const ic=n=>`<svg class="ic"><use href="#i-${n}"/></svg>`;
 const newTrack=()=>({cars:[{l:1,u:0}],bought:0,up:0});
-const freshS=()=>({money:12,tr:[newTrack()],own:{col:['#ff4d6d','#ffb703'],body:['sedan'],trail:['none'],theme:['asphalt']},sel:{col:'#ff4d6d',body:'sedan',trail:'none',theme:'asphalt'},best:1,t:Date.now(),ips:0,pend:0,uid:'',cloudTs:0,snd:1,vol:.7});
+const freshS=()=>({money:12,tr:[newTrack()],own:{col:['#ff4d6d','#ffb703'],body:['sedan'],trail:['none'],theme:['asphalt']},sel:{col:'#ff4d6d',body:'sedan',trail:'none',theme:'asphalt'},best:1,t:Date.now(),ips:0,pend:0,uid:'',cloudTs:0,snd:1,vol:.7,bgm:1,bvol:.5});
 let S=freshS(),RELOADING=false;
 const KEY='circuit-tycoon-v2';
 let offMsg='';
@@ -522,7 +523,7 @@ function drawCar(cx,l){
   cx.drawImage(SPR[l],-40,-24,80,48);
 }
 const mass=c=>1+.12*(c.l-1);
-function collideAll(cs,sp,Dof){
+function collideAll(cs,sp,Dof,onHit){
   const ord=cs.slice().sort((a,b)=>a.u-b.u),n=ord.length;
   for(let it=0;it<3;it++)for(let k=0;k<n;k++){
     const f=ord[k],l=ord[(k+1)%n];if(f===l)continue;
@@ -532,7 +533,7 @@ function collideAll(cs,sp,Dof){
       const mf=mass(f),ml=mass(l),ov=D-gap;
       l.u+=ov*mf/(mf+ml);f.u-=ov*ml/(mf+ml);
       const vr=(f.v||0)-(l.v||0);
-      if(vr>0){const j=(1+CFG.bounce)*vr/(1/mf+1/ml)/CFG.hitDiv,m=Math.min(1,vr/sp/1.5),sg=Math.random()<.5?-1:1;f.v-=j/mf;l.v+=j/ml;l.wa=sg*.5*m;f.wa=-sg*.35*m;if(vr>sp*.12){f.sn=.7+1.3*m;f.v*=.75;f.b=0}}
+      if(vr>0){const j=(1+CFG.bounce)*vr/(1/mf+1/ml)/CFG.hitDiv,m=Math.min(1,vr/sp/1.5),sg=Math.random()<.5?-1:1;f.v-=j/mf;l.v+=j/ml;l.wa=sg*.5*m;f.wa=-sg*.35*m;if(vr>sp*.12){f.sn=.7+1.3*m;f.v*=.75;f.b=0;if(onHit)onHit(m,f.u)}}
     }
   }
 }
@@ -562,6 +563,18 @@ function burst(r,x,y,col,n){for(let i=0;i<n&&r.parts.length<60;i++){const a=Math
 
 // ===== 카드 UI =====
 const list=$('#list'),obs=new IntersectionObserver(es=>es.forEach(e=>{R[+e.target.dataset.i].vis=e.isIntersecting}),{root:list,rootMargin:'80px'});
+// 트랙 효과음 볼륨: 카드가 화면(목록 영역)에 보이는 비율에 따라 0~1로 부드럽게 변함
+function viewFrac(r){
+  const n=performance.now();if(r._vt&&n-r._vt<60)return r._vf;
+  const a=r.el.getBoundingClientRect(),b=list.getBoundingClientRect(),h=a.height||1;
+  const f=clamp01((Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top))/h);
+  r._vt=n;r._vf=f*f*(3-2*f);return r._vf;
+}
+function trackHit(r,m,u){
+  const n=performance.now();if(n-(r.hitT||0)<180||!r.vis)return;
+  const v=viewFrac(r);if(v<.03)return;
+  r.hitT=n;pos(r,u);SND.crash(m,v,r.W?PX/r.W*2-1:0);
+}
 let lockEl=null;
 function addCard(i){
   const el=document.createElement('section');el.className='card';el.dataset.i=i;
@@ -598,22 +611,264 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.remove('show')
 let gainAcc=0,gainT=0;
 function spawnGain(v){const p=document.querySelector('.hud'),e=document.createElement('div');e.className='gain';e.textContent='+'+fmt(v);p.appendChild(e);setTimeout(()=>e.remove(),950)}
 
-// ===== 사운드: WebAudio 합성 (부드러운 마림바/칼림바 계열 + 잔향). 외부 파일 없음 =====
+// ===== 사운드: WebAudio 합성 (실제 줄 진동 모델링: 어쿠스틱 기타 + 몸통 공명 + 자연스러운 룸 잔향). 외부 파일 없음 =====
+// 사운드는 처음 한 번 오프라인으로 스테레오 버퍼에 렌더링해 두고 재생 → 음질은 높고 CPU는 거의 안 씀.
 const PENTA=[0,2,4,7,9];
 const SND=(()=>{
-  let ac=null,bus=null,master=null,nb=null,last=0,cnt=0,lastK=-1;
-  const vol=()=>S.snd===0?0:Math.pow(S.vol===undefined?.7:S.vol,1.6)*.6;
-  function ir(sec,dec){const n=(ac.sampleRate*sec)|0,b=ac.createBuffer(2,n,ac.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);let y=0;for(let i=0;i<n;i++){y=y*.55+(Math.random()*2-1)*.45;d[i]=y*Math.pow(1-i/n,dec)}}return b}
+  let ac=null,dry=null,conv=null,master=null,nb=null,SR=44100,last=0,cnt=0,lastK=-1,lastB=-1,lastC=-1,cC=0;
+  const cache={};
+  const vol=()=>S.snd===0?0:Math.pow(S.vol===undefined?.7:S.vol,1.6)*.6*.85;
+  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+  // 차 등급(Lv.1~20)마다 고유한 음 하나: G2(98Hz)에서 시작해 C장조 음계를 따라 한 칸씩 올라감 (최고 Lv.20 ≈ E5)
+  const SC=[0,2,4,5,7,9,10],LVF=i=>98*Math.pow(2,(SC[i%7]+12*((i/7)|0))/12);
+
+  // ---- 룸 잔향 IR: 초기 반사 + 고음부터 먼저 죽는 부드러운 꼬리 ----
+  function mkIR(sec){
+    const n=(SR*sec)|0,b=ac.createBuffer(2,n,SR),pd=(SR*.014)|0,er=[.019,.027,.041,.053,.068,.083,.101];
+    for(let c=0;c<2;c++){
+      const d=b.getChannelData(c);let y=0;
+      for(let i=pd;i<n;i++){const t=(i-pd)/(n-pd),k=.3+.66*Math.min(1,t*1.7);y=y*k+(Math.random()*2-1)*(1-k);d[i]=y*Math.exp(-4.2*t)*(1-t)}
+      er.forEach((s,j)=>{const p=(SR*(s+c*.0017))|0;if(p<n)d[p]+=(j%2?-1:1)*(.5-j*.045)*(c?.9:1)*.35});
+    }
+    return b;
+  }
+
+  // ---- 오프라인 렌더용 합성 부품 (페이저 재귀 발진기 = 빠르고 정확한 음정) ----
+  function part(buf,off,f,amp,tau,att){
+    if(f<=0||f>SR*.42||off>=buf.length)return;
+    const c=2*Math.cos(2*Math.PI*f/SR),dec=Math.exp(-1/(tau*SR)),n=buf.length-off,end=amp*1e-3;
+    let p=0,q=Math.sin(2*Math.PI*f/SR),e=amp;
+    for(let i=0;i<n;i++){
+      buf[off+i]+=p*e*(i<att?i/att:1);
+      const x=c*q-p;p=q;q=x;e*=dec;if(e<end)break;
+    }
+  }
+  // 모달 합성: 부분음마다 다른 감쇠, 좌우 미세 디튠으로 넓고 살아있는 소리
+  function modal(L,R,o,f,ps,v,ts,dt,att){
+    const a=Math.max(8,(att*SR)|0);
+    ps.forEach(([r,am,tau])=>{part(L,o,f*r*(1-dt),am*v,tau*ts,a);part(R,o,f*r*(1+dt),am*v,tau*ts,a)});
+  }
+  // 말렛/손가락이 닿는 짧은 노이즈 (소리에 '실제로 쳤다'는 질감)
+  function click(L,R,o,fc,tau,amp){
+    const len=Math.min(L.length-o,(tau*SR*6)|0),a=1-Math.exp(-2*Math.PI*fc/SR),b=1-Math.exp(-2*Math.PI*fc/7/SR);
+    [L,R].forEach(ch=>{let y1=0,y2=0;for(let i=0;i<len;i++){const x=Math.random()*2-1;y1+=a*(x-y1);y2+=b*(x-y2);ch[o+i]+=(y1-y2)*amp*Math.exp(-i/(tau*SR))}});
+  }
+  const tsc=(f,ex,lo,hi)=>clamp(Math.pow(523/f,ex),lo,hi);
+  // ---- 어쿠스틱 기타: Karplus-Strong 줄 모델 (분수 지연 올패스로 정확한 음정) ----
+  function ks(out,f,T,b,kx,dpos){
+    const per=SR/f,N=Math.floor(per-b-.3),fr=per-b-N,c=(1-fr)/(1+fr);
+    if(N<2)return;
+    const line=new Float32Array(N);let y=0;
+    for(let i=0;i<N;i++){y+=kx*((Math.random()*2-1)-y);line[i]=y}      // 피크로 뜯은 초기 줄 모양(부드러운 노이즈)
+    const e=Float32Array.from(line),d=Math.max(1,Math.round(N*dpos));    // 뜯는 위치에 따른 음색(빗살 필터)
+    let mean=0;for(let i=0;i<N;i++){line[i]=e[i]-e[(i+N-d)%N]*.9;mean+=line[i]}mean/=N;
+    let pk=1e-6;for(let i=0;i<N;i++){line[i]-=mean;pk=Math.max(pk,Math.abs(line[i]))}for(let i=0;i<N;i++)line[i]/=pk;
+    const g=Math.pow(10,-3/(T*f));let p=0,prev=0,ax=0,ay=0;
+    for(let i=0;i<out.length;i++){
+      const s=line[p];out[i]=s;
+      const f1=g*((1-b)*s+b*prev);prev=s;
+      const yy=c*(f1-ay)+ax;ax=f1;ay=yy;
+      line[p]=yy;p=p+1===N?0:p+1;
+    }
+  }
+  // 기타 몸통: 공기 공명(~105Hz)·상판 공명(~205Hz) 등을 더해 '통'의 울림을 만들고, 고음은 살짝 눌러 따뜻하게
+  function body(x){
+    const dry=Float32Array.from(x);
+    [[82,7,.7],[105,8,.85],[150,8,.5],[205,9,.55],[395,10,.28],[820,8,.12]].forEach(([fc,Q,g])=>{
+      const w=2*Math.PI*fc/SR,al=Math.sin(w)/(2*Q),a0=1+al,b0=al/a0,b2=-al/a0,a1=-2*Math.cos(w)/a0,a2=(1-al)/a0;
+      let x1=0,x2=0,y1=0,y2=0;
+      for(let i=0;i<x.length;i++){const xi=dry[i],yv=b0*xi+b2*x2-a1*y1-a2*y2;x2=x1;x1=xi;y2=y1;y1=yv;x[i]+=yv*g}
+    });
+    const a=1-Math.exp(-2*Math.PI*3600/SR);let y=0;for(let i=0;i<x.length;i++){y+=a*(x[i]-y);x[i]=y}
+  }
+  const V={
+    // 어쿠스틱 기타 한 줄: 줄 진동 + 몸통 공명 + 피크가 줄에 닿는 소리. 좌우 줄을 미세하게 달리해 넓게
+    gtr(L,R,o,f,v,x){
+      const T=(x||3.2)*tsc(f,.3,.55,1.35),n=Math.min(L.length-o,(T*1.15*SR)|0);
+      if(n<=0)return;
+      const tl=new Float32Array(n),tr=new Float32Array(n);
+      ks(tl,f*.9996,T,.5,.42,.14);ks(tr,f*1.0004,T,.5,.42,.14);
+      body(tl);body(tr);
+      for(let i=0;i<n;i++){L[o+i]+=tl[i]*v;R[o+i]+=tr[i]*v}
+      click(L,R,o,2400,.004,.035*v);
+    },
+    // 하모닉스(자연 배음): 맑고 짧게 '띵'
+    har(L,R,o,f,v){
+      const n=Math.min(L.length-o,(1.3*SR)|0);if(n<=0)return;
+      const tl=new Float32Array(n),tr=new Float32Array(n);
+      ks(tl,f*.9996,1.1,.4,.18,.5);ks(tr,f*1.0004,1.1,.4,.18,.5);
+      for(let i=0;i<n;i++){L[o+i]+=tl[i]*v;R[o+i]+=tr[i]*v}
+    },
+    // 나무 톡 (구매 시 '딸깍' 질감)
+    tok(L,R,o,f,v){modal(L,R,o,f,[[1,1,.05],[2.33,.5,.03],[4.1,.25,.015]],v,1,.001,.0008);click(L,R,o,1800,.008,.16*v)},
+    // 묵직한 쿵: 피치가 떨어지는 사인 + 2배음 + 낮은 충격음
+    thump(L,R,o,f,v){
+      const n=Math.min(L.length-o,(SR*.6)|0);let ph=0;
+      for(let i=0;i<n;i++){
+        const t=i/SR,fr=48+102*Math.exp(-t/.07);ph+=2*Math.PI*fr/SR;
+        let x=(Math.sin(ph)*Math.exp(-t/.11)+.2*Math.sin(2*ph)*Math.exp(-t/.05))*Math.min(1,t/.002);
+        x=Math.tanh(1.4*x)/1.4*v;L[o+i]+=x;R[o+i]+=x;
+      }
+      click(L,R,o,900,.004,.3*v);
+    },
+    // 공기가 올라오는 스윕 (SVF 밴드패스 노이즈)
+    swell(L,R,o,f,v){
+      const dur=f,n=Math.min(L.length-o,(dur*SR)|0);
+      [L,R].forEach(ch=>{
+        let lo=0,bd=0;
+        for(let i=0;i<n;i++){
+          const u=i/n,fc=600*Math.pow(4500/600,u),ff=2*Math.sin(Math.PI*clamp(fc,50,6000)/SR),x=Math.random()*2-1;
+          lo+=ff*bd;const hi=x-lo-bd/1.6;bd+=ff*hi;
+          ch[o+i]+=bd*v*Math.pow(Math.sin(Math.PI*Math.pow(u,.7)),1.5)*.5;
+        }
+      });
+    }
+  };
+  function render(dur,layers,peak){
+    const n=(SR*dur)|0,L=new Float32Array(n),R=new Float32Array(n);
+    layers.forEach(([k,f,t,v,x])=>V[k](L,R,(t*SR)|0,f,v,x));
+    let m=1e-6;for(let i=0;i<n;i++){const a=Math.abs(L[i]),b=Math.abs(R[i]);if(a>m)m=a;if(b>m)m=b}
+    // 부드러운 새츄레이션: 줄 튕기는 순간의 뾰족한 어택을 눌러 주고 뒤의 울림은 키워 줌 (따뜻하고 꽉 찬 소리)
+    let m2=1e-6;for(let i=0;i<n;i++){L[i]=Math.tanh(1.8*L[i]/m);R[i]=Math.tanh(1.8*R[i]/m);const a=Math.abs(L[i]),b=Math.abs(R[i]);if(a>m2)m2=a;if(b>m2)m2=b}
+    m=m2;
+    const g=peak/m,fo=(SR*.04)|0;
+    for(let i=0;i<n;i++){const w=i>n-fo?(n-i)/fo:1;L[i]*=g*w;R[i]*=g*w}
+    const b=ac.createBuffer(2,n,SR);b.getChannelData(0).set(L);b.getChannelData(1).set(R);return b;
+  }
+  const arpL=(inst,notes,t0,gap,v)=>notes.map((f,i)=>[inst,f,t0+i*gap,v]);
+  // 스트럼: 낮은 줄부터 위로 순서대로 살짝씩 늦게 (손으로 쓸어내리는 느낌)
+  const strum=(notes,t0,gap,v)=>notes.map((f,i)=>['gtr',f,t0+i*gap+Math.random()*.004,v*(1-i*.04)]);
+  const CM=[261.63,329.63,392,523.25];            // C 메이저 아르페지오 (이전보다 한 옥타브 아래)
+  const CO=[98,130.81,164.81,196,261.63,329.63];          // 낮은 오픈 C 보이싱 (G2 C3 E3 G3 C4 E4)
+  const BUILD={
+    buy:()=>render(1.8,[['tok',260,0,.45],...arpL('gtr',[146.83,196,293.66],.01,.08,1),['har',587.3,.22,.1]],.6),
+    merge:()=>render(3.2,[['swell',.32,0,.16],...strum([130.81,196,261.63,329.63,392],.04,.03,.9),...arpL('gtr',CM.slice(0,4),.22,.1,.6),['har',784,.65,.12]],.7),
+    up:()=>render(2.6,[['swell',.22,0,.1],...arpL('gtr',[196,246.94,293.66,392],.02,.085,.9),['har',587.3,.34,.12]],.64),
+    track:()=>render(4.6,[['thump',0,0,.8],...strum(CO,.05,.035,.95),...arpL('gtr',CM,.45,.11,.6),['har',784,1,.12]],.78),
+    land:()=>render(4.2,[['thump',0,0,.9],...strum(CO,.02,.032,.95),...arpL('gtr',CM.slice(2),.38,.1,.5)],.82)
+  };
+  function get(key){
+    if(cache[key])return cache[key];
+    let b;
+    if(BUILD[key])b=BUILD[key]();
+    else{const i=+key.slice(3),f=LVF(i);b=key[0]==='g'?render(2.4,[['gtr',f,0,1,1.7]],.66):render(1.4,[['har',f*2,0,1]],.42)}
+    return cache[key]=b;
+  }
+  function warm(){ // 첫 터치 직후 한꺼번에 렌더링하면 버벅일 수 있어 조금씩 나눠서 미리 준비
+    const keys=[];for(let i=0;i<20;i++)keys.push('gtr'+i);['buy','merge','up','track','land'].forEach(k=>keys.push(k));for(let i=11;i<20;i++)keys.push('har'+i);
+    let j=0;(function step(){if(!ac||j>=keys.length)return;try{get(keys[j++])}catch(e){}setTimeout(step,70)})();
+  }
+
+  // ---- 재생 ----
+  function play(buf,t,o){
+    o=o||{};const s=ac.createBufferSource();s.buffer=buf;if(o.rate)s.playbackRate.value=o.rate;
+    const g=ac.createGain();g.gain.value=o.v===undefined?1:o.v;const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=o.lp||4200;lp.Q.value=.5;s.connect(g);g.connect(lp);let out=lp;
+    if(o.pan&&ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=clamp(o.pan,-.8,.8);lp.connect(p);out=p}
+    send(out,o.wet===undefined?.35:o.wet);s.start(t);
+  }
+  function send(node,wet){node.connect(dry);if(wet>0){const w=ac.createGain();w.gain.value=wet;node.connect(w);w.connect(conv)}}
+  function noiseSrc(t,dur){const s=ac.createBufferSource();s.buffer=nb;s.loop=true;s.start(t,Math.random()*1.5);s.stop(t+dur+.05);return s}
+  function whoosh(t){ // 차가 스쳐 지나가는 '쉬잉': 밝은 공기 + 낮은 바람, 좌→우 이동
+    const D=.8,s=noiseSrc(t,D),f=ac.createBiquadFilter();f.type='bandpass';f.Q.value=.9;
+    f.frequency.setValueAtTime(2800,t);f.frequency.exponentialRampToValueAtTime(380,t+D);
+    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.2,t+.22);g.gain.exponentialRampToValueAtTime(.0001,t+D);
+    s.connect(f);f.connect(g);let out=g;
+    if(ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.setValueAtTime(-.6,t);p.pan.linearRampToValueAtTime(.4,t+D);g.connect(p);out=p}
+    send(out,.25);
+    const s2=noiseSrc(t,.6),f2=ac.createBiquadFilter();f2.type='lowpass';f2.frequency.setValueAtTime(700,t);f2.frequency.exponentialRampToValueAtTime(140,t+.6);
+    const g2=ac.createGain();g2.gain.setValueAtTime(.0001,t);g2.gain.linearRampToValueAtTime(.12,t+.2);g2.gain.exponentialRampToValueAtTime(.0001,t+.6);
+    s2.connect(f2);f2.connect(g2);send(g2,.2);
+  }
+  function skid(t,dur){ // 타이어 마찰: 불규칙하게 떨리는 밴드 노이즈 + 아주 작은 고무 끽 소리
+    const s=noiseSrc(t,dur),f=ac.createBiquadFilter();f.type='bandpass';f.Q.value=4;
+    const cu=new Float32Array(24);for(let i=0;i<24;i++)cu[i]=1500+(Math.random()*2-1)*380;
+    try{f.frequency.setValueCurveAtTime(cu,t,dur)}catch(e){f.frequency.value=1500}
+    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.1,t+.12);g.gain.setValueAtTime(.1,t+Math.max(.13,dur-.2));g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    const am=ac.createGain();am.gain.value=.68;const lf=ac.createOscillator(),ld=ac.createGain();lf.frequency.value=19;ld.gain.value=.32;lf.connect(ld);ld.connect(am.gain);lf.start(t);lf.stop(t+dur+.05);
+    s.connect(f);f.connect(g);g.connect(am);send(am,.2);
+    const sq=ac.createOscillator(),sg=ac.createGain(),sl=ac.createBiquadFilter();sq.type='triangle';sl.type='lowpass';sl.frequency.value=3000;
+    sq.frequency.setValueAtTime(1850,t);sq.frequency.linearRampToValueAtTime(2150,t+dur);
+    sg.gain.setValueAtTime(.0001,t);sg.gain.linearRampToValueAtTime(.012,t+.2);sg.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    sq.connect(sl);sl.connect(sg);sg.connect(am);sq.start(t);sq.stop(t+dur+.05);
+  }
+
+  function panOut(node,pan){if(pan&&ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=clamp(pan,-.8,.8);node.connect(p);return p}return node}
+  // 부스트: 엔진 회전수가 치솟는 '부우웅' + 터보 휘파람 + 끝에 블로오프 '취익'
+  function boostSnd(t,v,pan){
+    const D=1.5,o=ac.createGain();o.gain.value=v*1.25;
+    const f=ac.createBiquadFilter();f.type='lowpass';f.Q.value=3;
+    f.frequency.setValueAtTime(260,t);f.frequency.exponentialRampToValueAtTime(2600,t+.9);f.frequency.exponentialRampToValueAtTime(900,t+D);
+    const am=ac.createGain();am.gain.value=.7;
+    const lf=ac.createOscillator(),ld=ac.createGain();lf.frequency.setValueAtTime(20,t);lf.frequency.exponentialRampToValueAtTime(70,t+.9);ld.gain.value=.3;lf.connect(ld);ld.connect(am.gain);lf.start(t);lf.stop(t+D+.05);
+    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.26,t+.1);g.gain.setValueAtTime(.26,t+.8);g.gain.exponentialRampToValueAtTime(.0001,t+D);
+    [[1,'sawtooth',1],[1.007,'sawtooth',1],[.5,'square',.5]].forEach(([m,ty,a])=>{
+      const os=ac.createOscillator(),og=ac.createGain();os.type=ty;og.gain.value=a;
+      os.frequency.setValueAtTime(55*m,t);os.frequency.exponentialRampToValueAtTime(230*m,t+.9);os.frequency.exponentialRampToValueAtTime(170*m,t+D);
+      os.connect(og);og.connect(f);os.start(t);os.stop(t+D+.05);
+    });
+    f.connect(am);am.connect(g);g.connect(o);
+    // 바람 가르는 소리
+    const s=noiseSrc(t,D),bp=ac.createBiquadFilter();bp.type='bandpass';bp.Q.value=.8;
+    bp.frequency.setValueAtTime(500,t);bp.frequency.exponentialRampToValueAtTime(3600,t+.9);
+    const ng=ac.createGain();ng.gain.setValueAtTime(.0001,t);ng.gain.linearRampToValueAtTime(.22,t+.7);ng.gain.exponentialRampToValueAtTime(.0001,t+D);
+    s.connect(bp);bp.connect(ng);ng.connect(o);
+    // 터보 휘파람
+    const w=ac.createOscillator(),wg=ac.createGain();w.type='sine';w.frequency.setValueAtTime(1700,t+.05);w.frequency.exponentialRampToValueAtTime(4300,t+.9);
+    wg.gain.setValueAtTime(.0001,t);wg.gain.linearRampToValueAtTime(.03,t+.6);wg.gain.exponentialRampToValueAtTime(.0001,t+1);
+    w.connect(wg);wg.connect(o);w.start(t);w.stop(t+1.05);
+    // 블로오프 밸브
+    const s2=noiseSrc(t+.9,.35),hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=3200;
+    const bg=ac.createGain();bg.gain.setValueAtTime(.0001,t+.9);bg.gain.linearRampToValueAtTime(.18,t+.93);bg.gain.exponentialRampToValueAtTime(.0001,t+1.25);
+    s2.connect(hp);hp.connect(bg);bg.connect(o);
+    send(panOut(o,pan),.18);
+  }
+  // 충돌: 묵직한 차체 충격 + 우그러지는 왜곡 와그작 + 철판 찢김 + 튀는 파편 + 낮은 울림 (세기 m 에 따라 크기·길이 변화)
+  let distC=null;
+  function dist(){if(!distC){distC=new Float32Array(512);for(let i=0;i<512;i++)distC[i]=Math.tanh(5*(i/256-1))}const w=ac.createWaveShaper();w.curve=distC;return w}
+  function crashSnd(t,m,v,pan){
+    const o=ac.createGain();o.gain.value=(.55+.45*m)*v*1.5;
+    // 1) 차체가 부딪히는 묵직한 충격
+    const b=ac.createOscillator(),bg=ac.createGain();b.type='sine';b.frequency.setValueAtTime(190,t);b.frequency.exponentialRampToValueAtTime(34,t+.24);
+    bg.gain.setValueAtTime(.0001,t);bg.gain.linearRampToValueAtTime(.9,t+.003);bg.gain.exponentialRampToValueAtTime(.0001,t+.34);
+    b.connect(bg);bg.connect(o);b.start(t);b.stop(t+.36);
+    // 2) 우그러지는 와그작: 찌그러뜨린(왜곡) 노이즈를 시간차로 세 번
+    [[0,.16,.55],[.04,.13,.4],[.095,.12,.3]].forEach(([dl,dc,a])=>{
+      const s=noiseSrc(t+dl,dc+.05),bp=ac.createBiquadFilter();bp.type='bandpass';bp.frequency.value=700+Math.random()*1500;bp.Q.value=.7;
+      const ws=dist(),sg=ac.createGain();sg.gain.setValueAtTime(.0001,t+dl);sg.gain.linearRampToValueAtTime(a,t+dl+.002);sg.gain.exponentialRampToValueAtTime(.0001,t+dl+dc);
+      s.connect(bp);bp.connect(ws);ws.connect(sg);sg.connect(o);
+    });
+    // 3) 철판이 찢기는 금속 소리
+    const base=300+Math.random()*220;
+    [[1,.16,.42],[2.42,.12,.3],[3.87,.08,.22],[5.4,.05,.15]].forEach(([r,a,d],k)=>{
+      const os=ac.createOscillator(),og=ac.createGain();os.type=k?'triangle':'sawtooth';os.frequency.value=base*r;
+      og.gain.setValueAtTime(.0001,t);og.gain.linearRampToValueAtTime(a*(.6+.4*m),t+.002);og.gain.exponentialRampToValueAtTime(.0001,t+d*(.8+.5*m));
+      os.connect(og);og.connect(o);os.start(t);os.stop(t+d*1.4);
+    });
+    // 4) 튀는 파편 소리 (짧은 고음 톡톡톡)
+    const s3=noiseSrc(t,.5),hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=3000;
+    const dg=ac.createGain();dg.gain.setValueAtTime(.0001,t);
+    let tk=t+.04;for(let k=0;k<6;k++){dg.gain.linearRampToValueAtTime((.1+Math.random()*.12)*(.6+.4*m),tk+.002);dg.gain.exponentialRampToValueAtTime(.0001,tk+.03);tk+=.035+Math.random()*.05}
+    s3.connect(hp);hp.connect(dg);dg.connect(o);
+    // 5) 낮게 깔리는 울림
+    const s4=noiseSrc(t,.5),lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=260;
+    const lg=ac.createGain();lg.gain.setValueAtTime(.0001,t);lg.gain.linearRampToValueAtTime(.45,t+.01);lg.gain.exponentialRampToValueAtTime(.0001,t+.45);
+    s4.connect(lp);lp.connect(lg);lg.connect(o);
+    send(panOut(o,pan),.2);
+  }
+
   function init(){
     if(ac)return true;
     const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return false;
     try{ac=new AC()}catch(e){return false}
+    SR=ac.sampleRate;
     master=ac.createGain();master.gain.value=vol();
+    const air=ac.createBiquadFilter();air.type='highshelf';air.frequency.value=9000;air.gain.value=-3; // 귀 아픈 고음 살짝 정리
     const cp=ac.createDynamicsCompressor();cp.threshold.value=-20;cp.knee.value=20;cp.ratio.value=5;cp.attack.value=.004;cp.release.value=.25;
-    master.connect(cp);cp.connect(ac.destination);
-    bus=ac.createGain();bus.connect(master);
-    const rv=ac.createConvolver();rv.buffer=ir(3.2,2.1);const wg=ac.createGain();wg.gain.value=.4;bus.connect(rv);rv.connect(wg);wg.connect(master);
-    nb=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate);{const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+    master.connect(air);air.connect(cp);cp.connect(ac.destination);
+    dry=ac.createGain();dry.connect(master);
+    conv=ac.createConvolver();conv.buffer=mkIR(3.4);const wg=ac.createGain();wg.gain.value=.95;conv.connect(wg);wg.connect(master);
+    nb=ac.createBuffer(1,SR*2,SR);{const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+    setTimeout(warm,60);
     return true;
   }
   function unlock(){if(!init())return;if(ac.state!=='running')ac.resume().catch(()=>{})}
@@ -622,59 +877,136 @@ const SND=(()=>{
     if(ac.state!=='running'){ac.resume().catch(()=>{});return false}
     master.gain.value=vol();return true;
   }
-  // 한 음: 사인 + 은은한 배음, 빠른 어택 / 부드러운 감쇠, 로우패스
-  function pluck(f,t,v,dec,pan,br){
-    const g=ac.createGain(),lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=Math.min(7000,f*5);lp.Q.value=.3;
-    g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(v,t+.006);g.gain.exponentialRampToValueAtTime(.0001,t+dec);
-    [[1,1,1],[1.004,.45,.95],[2,.3*br,.7],[3,.1*br,.4],[4.02,.12*br,.3]].forEach(([m,a,dr])=>{
-      const o=ac.createOscillator(),og=ac.createGain();o.type='sine';o.frequency.value=f*m;
-      og.gain.setValueAtTime(Math.max(.0004,a),t);og.gain.exponentialRampToValueAtTime(.0002,t+dec*dr);
-      o.connect(og);og.connect(g);o.start(t);o.stop(t+dec+.05);
-    });
-    g.connect(lp);let out=lp;
-    if(pan&&ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=Math.max(-.8,Math.min(.8,pan));lp.connect(p);out=p}
-    out.connect(bus);
-  }
-  function noise(t,dur,fa,fb,q,v){
-    const s=ac.createBufferSource();s.buffer=nb;s.loop=true;
-    const f=ac.createBiquadFilter();f.type='bandpass';f.Q.value=q;f.frequency.setValueAtTime(fa,t);f.frequency.exponentialRampToValueAtTime(fb,t+dur);
-    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(v,t+dur*.25);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
-    s.connect(f);f.connect(g);g.connect(bus);s.start(t,Math.random());s.stop(t+dur+.05);
-  }
-  function thump(t,v){
-    const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(48,t+.22);
-    g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+.26);o.connect(g);g.connect(master);o.start(t);o.stop(t+.3);
-  }
-  const arp=(t,notes,gap,v,dec)=>notes.forEach((f,i)=>pluck(f,t+i*gap,v,dec,0,1.1));
   return{
-    unlock,
-    // 한 바퀴: 펜타토닉 음 하나. 등급이 높을수록 한 옥타브 위 + 반짝임. 동시에 너무 많이 울리지 않게 제한.
-    lap(l,pan){
+    unlock,ctx:()=>ac,get,
+    // 한 바퀴: 그 차 등급 고유의 기타 음 하나 (Lv.12 이상은 은은한 배음 추가). 동시 발음 제한.
+    lap(l,pan,vis){
+      if(vis===undefined)vis=1;
       if(!ready())return;
       const now=ac.currentTime;if(now-last>.12){last=now;cnt=0}if(++cnt>3)return;
-      let k;do{k=(Math.random()*5)|0}while(k===lastK&&Math.random()<.8);lastK=k;
-      const f=523.25*Math.pow(2,(PENTA[k]+(l>=12?12:0))/12);
-      pluck(f,now+.005,.2,1.5,pan*.6,1);pluck(f/2,now+.005,.06,1.8,pan*.6,.4);
-      if(l>=8)pluck(f*2,now+.045,.08,1.2,pan*.6,.5);
+      const i=clamp((l|0)-1,0,19),p=pan*.6,tp=1-.3*i/19; // 등급이 높을수록(높은 음일수록) 살짝 작게
+      play(get('gtr'+i),now+.005,{v:.78*tp*vis,pan:p,wet:.5});
+      if(l>=12)play(get('har'+i),now+.04,{v:.12*vis,pan:p,wet:.4});
     },
     sfx(n){
-      if(!ready())return;const t=ac.currentTime+.005;
-      if(n==='buy'){arp(t,[392,587.3,783.99],.08,.15,1.2);pluck(196,t,.08,1.6,0,.4)}
-      else if(n==='merge'){arp(t,[523.25,659.25,783.99,1046.5],.1,.17,1.8);[261.63,392].forEach(f=>pluck(f,t,.07,2.2,0,.4))}
-      else if(n==='up'){arp(t,[587.3,740,880,1174.7],.085,.15,1.6);pluck(1760,t+.3,.06,1.8,0,.3)}
-      else if(n==='track'){thump(t,.3);arp(t,[523.25,659.25,783.99,1046.5,1318.5],.11,.17,2.4);[261.63,329.63,392].forEach(f=>pluck(f,t+.1,.08,3,0,.4))}
+      if(!ready()||!BUILD[n])return;
+      play(get(n),ac.currentTime+.005,{v:.8,lp:3800,wet:n==='track'?.62:.52});
     },
-    // 새 등급 연출: 쉭(진입) -> 타이어 스키드 -> 쿵 + 맑은 아르페지오(착지)
+    // 부스트 사용: 엔진 + 터보 소리 (v: 크기 0~1)
+    boost(v,pan){
+      if(!ready())return;const now=ac.currentTime;
+      if(now-lastB<.12)return;lastB=now;
+      boostSnd(now+.005,v===undefined?1:v,pan||0);
+    },
+    // 충돌: m = 충돌 세기 0~1, v = 화면에 보이는 정도 0~1
+    crash(m,v,pan){
+      if(!ready())return;const now=ac.currentTime;
+      if(now-lastC>.2){lastC=now;cC=0}if(++cC>2)return;
+      crashSnd(now+.003,clamp(m,0,1),v===undefined?1:v,pan||0);
+    },
+    // 새 등급 연출: 쉬잉(진입) -> 타이어 스키드 -> 쿵 + 기타 스트럼 + 아르페지오(착지)
     reveal(t0,D){
       if(!ready())return;const now=ac.currentTime;
-      noise(now+.02,.7,3200,500,1.2,.16);
-      noise(now+t0+.25,Math.max(.5,D-.4),1700,1100,8,.09);
-      const ta=now+t0+D;thump(ta,.42);
-      [523.25,659.25,783.99,1046.5,1318.5].forEach((f,i)=>pluck(f,ta+i*.09,.2,2.6,0,1.2));[261.63,329.63,392].forEach(f=>pluck(f,ta+.05,.08,3.2,0,.4));
+      whoosh(now+.02);
+      skid(now+t0+.25,Math.max(.5,D-.4));
+      play(get('land'),now+t0+D,{v:.8,lp:3800,wet:.62});
     }
   };
 })();
 ['pointerdown','touchstart','keydown'].forEach(e=>addEventListener(e,SND.unlock,{passive:true}));
+// ===== 배경음악: bgm.mp3 (이 파일과 같은 폴더). 곡 끝과 처음을 겹쳐서(크로스페이드) 끊김 없이 이어 붙임.
+//   · 앱을 벗어나거나 화면이 꺼지면 즉시 정지, 돌아오면 이어서 재생
+//   · 효과음과 별개의 음소거/볼륨 (설정 > 사운드)
+//   · bgm.mp3 가 없으면 아무 소리/오류 없이 그냥 넘어감
+const BGM=(()=>{
+  const FILE='bgm.mp3',XF0=3.5;
+  let ac=null,out=null,buf=null,st=0,lay=[],nextT=0,tmr=0,t0=0,t1=0,xf=XF0,els=null,cur=0,elTmr=0,paused=false;
+  // st: 0 대기 · 1 불러오는 중 · 2 WebAudio 재생 · 3 audio 태그 재생(대체 경로) · 4 파일 없음/실패
+  const vol=()=>S.bgm===0?0:Math.pow(S.bvol===undefined?.5:S.bvol,1.6)*.8;
+  const cin=new Float32Array(96),cout=new Float32Array(96);
+  for(let i=0;i<96;i++){const x=i/95;cin[i]=Math.sin(x*Math.PI/2);cout[i]=Math.cos(x*Math.PI/2)} // 등전력 페이드
+
+  // 앞뒤 무음 구간을 잘라내서 이음새에 빈 소리가 끼지 않게
+  function trim(b){
+    const n=b.length,ch=b.numberOfChannels,d=[];for(let c=0;c<ch;c++)d.push(b.getChannelData(c));
+    const loud=i=>{for(let c=0;c<ch;c++)if(Math.abs(d[c][i])>.004)return true;return false};
+    let a=0,z=n-1;while(a<n&&!loud(a))a++;while(z>a&&!loud(z))z--;
+    return [a/b.sampleRate,(z+1)/b.sampleRate];
+  }
+  function layer(T,fin){
+    const s=ac.createBufferSource(),g=ac.createGain(),len=t1-t0,te=T+len;
+    s.buffer=buf;g.gain.value=0;s.connect(g);g.connect(out);
+    g.gain.setValueCurveAtTime(cin,T,fin);          // 들어오며 점점 커지고
+    g.gain.setValueCurveAtTime(cout,te-xf,xf);      // 끝나기 전 점점 작아짐 (다음 반복이 그 위로 겹쳐 들어옴)
+    s.start(T,t0,len);
+    const L={s,g};lay.push(L);s.onended=()=>{try{g.disconnect()}catch(e){}lay=lay.filter(x=>x!==L)};
+    nextT=te-xf;
+  }
+  function tick(){if(st===2&&ac&&ac.state==='running'&&nextT-ac.currentTime<3)layer(nextT,xf)}
+  function startWA(){
+    ac=SND.ctx();out=ac.createGain();out.gain.value=0;out.connect(ac.destination);
+    [t0,t1]=trim(buf);xf=Math.max(.2,Math.min(XF0,(t1-t0)/3));
+    st=2;layer(ac.currentTime+.1,Math.min(1.5,xf));
+    out.gain.setTargetAtTime(vol(),ac.currentTime,.3);
+    tmr=setInterval(tick,300);
+    if(document.hidden)pause();
+  }
+  function load(){
+    st=1;ac=SND.ctx();
+    if(!ac){startEl();return}
+    fetch(FILE).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer()})
+      .then(ab=>new Promise((ok,no)=>{const p=ac.decodeAudioData(ab,ok,no);if(p&&p.catch)p.catch(no)}))
+      .then(b=>{buf=b;if(st===1)startWA()})
+      .catch(()=>{if(st===1)startEl()}); // file:// 등 fetch 가 막힌 환경 → audio 태그로 대체
+  }
+
+  // ---- 대체 경로: audio 태그 2개를 번갈아 겹쳐 재생 ----
+  function elApply(){if(els)els.forEach(o=>{try{o.a.volume=Math.max(0,Math.min(1,vol()*Math.sin(o.f*Math.PI/2)));o.a.muted=vol()===0}catch(e){}})}
+  function startEl(){
+    st=3;
+    els=[0,1].map(()=>{const a=new Audio();a.preload='auto';a.src=FILE;const o={a,f:0,dir:0};
+      a.addEventListener('error',()=>{if(st===3){clearInterval(elTmr);els.forEach(x=>x.a.pause());st=4}});return o});
+    cur=0;els[0].dir=1;els[0].a.play().catch(()=>{});
+    elTmr=setInterval(elTick,80);
+    if(document.hidden)pause();
+  }
+  function elTick(){
+    if(st!==3||paused)return;
+    const c=els[cur],n=els[1-cur],d=.08/XF0,a=c.a;
+    if(c.dir===1&&n.dir===0&&isFinite(a.duration)&&a.duration>XF0*2&&a.currentTime>a.duration-XF0-.1){
+      c.dir=-1;n.a.currentTime=0;n.f=0;n.dir=1;n.a.play().catch(()=>{});cur=1-cur;
+    }
+    els.forEach(o=>{
+      if(o.dir===1)o.f=Math.min(1,o.f+d);
+      else if(o.dir===-1){o.f=Math.max(0,o.f-d);if(o.f===0){o.a.pause();o.dir=0}}
+    });
+    elApply();
+  }
+
+  function pause(){
+    paused=true;
+    if(st===2&&ac&&ac.state==='running')ac.suspend().catch(()=>{});
+    else if(st===3&&els)els.forEach(o=>o.a.pause());
+  }
+  function resume(){
+    paused=false;
+    if(st===2&&ac)ac.resume().catch(()=>{});
+    else if(st===3&&els)els.forEach(o=>{if(o.dir!==0)o.a.play().catch(()=>{})});
+  }
+  return{
+    // 사용자 터치 직후(브라우저가 소리 재생을 허용하는 시점)에 호출. 켜져 있고 아직 시작 전이면 시작.
+    kick(){if(st!==0||S.bgm===0||document.hidden)return;SND.unlock();load()},
+    vol(){
+      if(st===2&&out)out.gain.setTargetAtTime(vol(),ac.currentTime,.06);
+      else if(st===3)elApply();
+    },
+    pause,resume
+  };
+})();
+['pointerdown','touchstart','keydown'].forEach(e=>addEventListener(e,BGM.kick,{passive:true}));
+document.addEventListener('visibilitychange',()=>{document.hidden?BGM.pause():BGM.resume()});
+addEventListener('pagehide',BGM.pause);
+addEventListener('pageshow',()=>{if(!document.hidden)BGM.resume()});
 addEventListener('visibilitychange',()=>{if(!document.hidden)SND.unlock()});
 
 // ===== 새 등급 해금 연출 =====
@@ -691,17 +1023,17 @@ function fxTarget(run){ // 새 차가 실제로 달리고 있는 현재 위치�
 }
 function fxLand(run,silent){
   if(run.landed)return;run.landed=true;FXHIDE.delete(run.car);
-  const tg=fxTarget(run);burst(run.r,tg.tx,tg.ty,'#ffd166',26);
+  const tg=fxTarget(run);burst(run.r,tg.tx,tg.ty,'#ffd166',6);
   if(silent)return;
   run.rings.push({x:tg.x,y:tg.y,l:1});
-  for(let k=0;k<22;k++){const a=Math.random()*6.3,v=120+Math.random()*260;run.sparks.push({x:tg.x,y:tg.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:1})}
+  for(let k=0;k<8;k++){const a=Math.random()*6.3,v=90+Math.random()*120;run.sparks.push({x:tg.x,y:tg.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:1})}
 }
 function fxNewCar(r,car,l){
   if(FX.run){fxLand(FX.run,true);FX.run=null;cancelAnimationFrame(FX.raf)}
   if(!FX.cv){const c=document.createElement('canvas');c.id='fx';$('#app').appendChild(c);FX.cv=c;FX.g=c.getContext('2d')}
   FXHIDE.add(car);
   const W=$('#app').clientWidth,streak=[];
-  for(let k=0;k<16;k++)streak.push({x:Math.random()*W,y:-Math.random()*300,len:80+Math.random()*160,v:1400+Math.random()*900});
+  for(let k=0;k<7;k++)streak.push({x:Math.random()*W,y:-Math.random()*300,len:80+Math.random()*160,v:1400+Math.random()*900});
   FX.run={r,car,l,t0:performance.now(),last:0,landed:false,marks:[],smoke:[],sparks:[],rings:[],streak,pl:null,pr:null};
   SND.reveal(FX_T0,FX_D);
   FX.raf=requestAnimationFrame(fxFrame);
@@ -718,7 +1050,7 @@ function fxFrame(now){
   const dim=.5*sstep(0,.25,el)*(1-sstep(FX_T0+FX_D+.3,end,el));
   g.fillStyle='rgba(6,8,12,'+dim+')';g.fillRect(0,0,W,H);
   // 진입 속도선
-  if(el<.9){g.strokeStyle='rgba(255,255,255,'+(.45*(1-el/.9))+')';g.lineWidth=2;g.lineCap='round';g.beginPath();
+  if(el<.9){g.strokeStyle='rgba(255,255,255,'+(.28*(1-el/.9))+')';g.lineWidth=2;g.lineCap='round';g.beginPath();
     run.streak.forEach(s=>{s.y+=s.v*dt;g.moveTo(s.x,s.y-s.len);g.lineTo(s.x,s.y)});g.stroke()}
   // 경로: 위 중앙에서 곧게 내려오다가 목표 쪽으로 미끄러지며 감속
   const tx=clamp01(tg.x/W)*W,ty=Math.max(60,Math.min(H-60,tg.y)),wc=W/2;
@@ -740,7 +1072,7 @@ function fxFrame(now){
     if(Math.abs(slip)>.18&&p<.97&&p>0){
       if(run.pl&&run.marks.length<240){run.marks.push({a:run.pl.x,b:run.pl.y,c:L.x,d:L.y,l:1,w:Math.max(2,5*sc)});run.marks.push({a:run.pr.x,b:run.pr.y,c:Rr.x,d:Rr.y,l:1,w:Math.max(2,5*sc)})}
       run.pl=L;run.pr=Rr;
-      [L,Rr].forEach(q=>{if(run.smoke.length<60&&Math.random()<.6)run.smoke.push({x:q.x,y:q.y,vx:(Math.random()-.5)*40-cs*30,vy:(Math.random()-.5)*40-sn*30,r:4*sc,l:1,s:sc})});
+      [L,Rr].forEach(q=>{if(run.smoke.length<24&&Math.random()<.28)run.smoke.push({x:q.x,y:q.y,vx:(Math.random()-.5)*40-cs*30,vy:(Math.random()-.5)*40-sn*30,r:4*sc,l:1,s:sc})});
     }else{run.pl=null;run.pr=null}
   }
   // 타이어 자국
@@ -751,20 +1083,20 @@ function fxFrame(now){
   // 연기
   run.smoke.forEach(s=>{s.x+=s.vx*dt;s.y+=s.vy*dt;s.vx*=.96;s.vy*=.96;s.r+=dt*22*s.s;s.l-=dt*1.5});
   run.smoke=run.smoke.filter(s=>s.l>0);
-  run.smoke.forEach(s=>{g.fillStyle='rgba(232,236,244,'+(.2*s.l*s.l)+')';g.beginPath();g.arc(s.x,s.y,s.r,0,6.3);g.fill()});
+  run.smoke.forEach(s=>{g.fillStyle='rgba(232,236,244,'+(.12*s.l*s.l)+')';g.beginPath();g.arc(s.x,s.y,s.r,0,6.3);g.fill()});
   // 차
   if(!run.landed){
     g.save();g.translate(px,py);
-    const gr=g.createRadialGradient(0,0,4,0,0,70*sc);gr.addColorStop(0,'rgba(255,214,102,.38)');gr.addColorStop(1,'rgba(255,214,102,0)');
+    const gr=g.createRadialGradient(0,0,4,0,0,70*sc);gr.addColorStop(0,'rgba(255,214,102,.2)');gr.addColorStop(1,'rgba(255,214,102,0)');
     g.fillStyle=gr;g.beginPath();g.arc(0,0,70*sc,0,6.3);g.fill();
     g.fillStyle='rgba(0,0,0,.3)';g.beginPath();g.ellipse(4*sc,10*sc,34*sc,14*sc,h,0,6.3);g.fill();
     g.rotate(h);g.scale(sc,sc);drawCar(g,run.l);g.restore();
   }
   if(p>=1&&!run.landed)fxLand(run);
   // 착지 연출: 충격파 + 불꽃
-  run.rings.forEach(q=>{q.l-=dt*1.8;const rr=(1-q.l)*110;g.strokeStyle='rgba(255,214,102,'+Math.max(0,q.l)*.8+')';g.lineWidth=2+5*q.l;g.beginPath();g.arc(q.x,q.y,rr,0,6.3);g.stroke()});
+  run.rings.forEach(q=>{q.l-=dt*1.8;const rr=(1-q.l)*90;g.strokeStyle='rgba(255,214,102,'+Math.max(0,q.l)*.5+')';g.lineWidth=1.5+3*q.l;g.beginPath();g.arc(q.x,q.y,rr,0,6.3);g.stroke()});
   run.rings=run.rings.filter(q=>q.l>0);
-  run.sparks.forEach(q=>{q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.93;q.vy*=.93;q.l-=dt*1.7;g.fillStyle='rgba(255,226,140,'+Math.max(0,q.l)+')';g.beginPath();g.arc(q.x,q.y,1.5+2.5*q.l,0,6.3);g.fill()});
+  run.sparks.forEach(q=>{q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.93;q.vy*=.93;q.l-=dt*2.2;g.fillStyle='rgba(255,226,140,'+Math.max(0,q.l)+')';g.beginPath();g.arc(q.x,q.y,1.2+1.6*q.l,0,6.3);g.fill()});
   run.sparks=run.sparks.filter(q=>q.l>0);
   // 배너
   const bt=el-(FX_T0+FX_D*.55);
@@ -797,7 +1129,7 @@ list.addEventListener('click',e=>{
   const r=R[+c.dataset.i],rc=c.getBoundingClientRect(),mx=e.clientX-rc.left,my=e.clientY-rc.top;
   let best=null,bd=34;
   S.tr[r.i].cars.forEach(k=>{pos(r,k.u);const d=Math.hypot(PX-mx,PY-my);if(d<bd){bd=d;best=k}});
-  if(best){pos(r,best.u);best.b=CFG.boostT}
+  if(best){pos(r,best.u);SND.boost(best.b>0?.55:1,r.W?PX/r.W*2-1:0);best.b=CFG.boostT}
 });
 
 // ===== 시트 (꾸미기 / 도감) =====
@@ -1279,7 +1611,7 @@ function renderSet(){
   else if(m.state==='err')sub='연결 실패';
   else if(!u){sub='로그인 안 됨';act='<button class="btn y" id="lgOpen">로그인 / 회원가입</button>'}
   else{who=esc(u.name||'내 계정');sub='<span id="syncs" style="padding:0"></span>';act='<button class="btn u" id="lgOut">로그아웃</button><button class="lgg" id="acDel">회원 탈퇴</button>'}
-  $('#body').innerHTML=`<div class="sc" style="--i:0"><div class="sch"><b>계정</b></div><div class="scb"><div class="hero"><canvas id="avp" class="avp" width="64" height="64"></canvas><div class="hi"><strong>${who}</strong><span>${sub}</span></div></div><div class="two"><button class="btn u" id="avPick">사진 변경</button><button class="btn u" id="avDel">삭제</button></div><input type="file" id="avFile" accept="image/*" hidden><div class="nk"><input class="inp" id="nick" maxlength="12" autocomplete="off" placeholder="닉네임" value="${esc(S.nick)}"><button class="btn y" id="nickOk">저장</button></div>${act?'<div class="sp"></div><div class="acb">'+act+'</div>':''}</div></div><div class="sc" style="--i:1"><div class="sch"><b>사운드</b></div><div class="scb"><div class="vol" id="sndP"><button class="mt" id="sndT" aria-label="효과음"><svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12.5 19V5L7.5 9.5z" fill="currentColor"/><g class="wv" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9a4.2 4.2 0 0 1 0 6"/><path d="M18.6 6.4a8 8 0 0 1 0 11.2"/></g><path class="sl" d="M4 4L20 20" fill="none" stroke="#1b1f26" stroke-width="5" stroke-linecap="round"/><path class="sl" d="M4 4L20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button><input type="range" class="rg" id="sndV" min="0" max="100"><b id="vv"></b></div></div></div>`;
+  $('#body').innerHTML=`<div class="sc" style="--i:0"><div class="sch"><b>계정</b></div><div class="scb"><div class="hero"><canvas id="avp" class="avp" width="64" height="64"></canvas><div class="hi"><strong>${who}</strong><span>${sub}</span></div></div><div class="two"><button class="btn u" id="avPick">사진 변경</button><button class="btn u" id="avDel">삭제</button></div><input type="file" id="avFile" accept="image/*" hidden><div class="nk"><input class="inp" id="nick" maxlength="12" autocomplete="off" placeholder="닉네임" value="${esc(S.nick)}"><button class="btn y" id="nickOk">저장</button></div>${act?'<div class="sp"></div><div class="acb">'+act+'</div>':''}</div></div><div class="sc" style="--i:1"><div class="sch"><b>사운드</b></div><div class="scb"><div class="vl">효과음</div><div class="vol" id="sndP"><button class="mt" id="sndT" aria-label="효과음"><svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12.5 19V5L7.5 9.5z" fill="currentColor"/><g class="wv" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 9a4.2 4.2 0 0 1 0 6"/><path d="M18.6 6.4a8 8 0 0 1 0 11.2"/></g><path class="sl" d="M4 4L20 20" fill="none" stroke="#1b1f26" stroke-width="5" stroke-linecap="round"/><path class="sl" d="M4 4L20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button><input type="range" class="rg" id="sndV" min="0" max="100"><b id="vv"></b></div><div class="vl" style="margin-top:14px">배경음악</div><div class="vol" id="bgmP"><button class="mt" id="bgmT" aria-label="배경음악"><svg viewBox="0 0 24 24"><path d="M9 17.5V6.5l9-2V16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="17.5" r="2.6" fill="currentColor"/><circle cx="15.8" cy="16" r="2.6" fill="currentColor"/><path class="sl" d="M4 4L20 20" fill="none" stroke="#1b1f26" stroke-width="5" stroke-linecap="round"/><path class="sl" d="M4 4L20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button><input type="range" class="rg" id="bgmV" min="0" max="100"><b id="bvv"></b></div></div></div>`;
   avPaint();
   const lo=$('#lgOpen');if(lo)lo.onclick=openLogin;
   const lt=$('#lgOut');if(lt)lt.onclick=doLogout;
@@ -1291,6 +1623,13 @@ function renderSet(){
   sT.onclick=()=>{S.snd=S.snd===0?1:0;save();sPaint();SND.unlock()};
   sV.oninput=()=>{S.vol=+sV.value/100;vp()};
   sV.onchange=()=>{S.vol=+sV.value/100;save()};
+  const bT=$('#bgmT'),bV=$('#bgmV'),bP=$('#bgmP'),bvv=$('#bvv'),
+    bp=()=>{bV.style.setProperty('--v',bV.value+'%');bvv.textContent=bV.value+'%'},
+    bPaint=()=>{const on=S.bgm!==0;bT.classList.toggle('mo',!on);bT.setAttribute('aria-pressed',on);bP.classList.toggle('mu',!on);bV.disabled=!on;bp()};
+  bV.value=Math.round((S.bvol===undefined?.5:S.bvol)*100);bPaint();
+  bT.onclick=()=>{S.bgm=S.bgm===0?1:0;save();bPaint();BGM.kick();BGM.vol()};
+  bV.oninput=()=>{S.bvol=+bV.value/100;bp();BGM.vol()};
+  bV.onchange=()=>{S.bvol=+bV.value/100;save()};
   const sy=$('#syncs');if(sy)sy.textContent=syncText();
   $('#nickOk').onclick=async()=>{
     const btn=$('#nickOk'),v=$('#nick').value.trim().slice(0,12);
@@ -1376,7 +1715,7 @@ function offLoop(t){
 $('#offcv').onclick=e=>{
   const r=e.currentTarget.getBoundingClientRect(),k=560/r.width,mx=(e.clientX-r.left)*k,my=(e.clientY-r.top)*k;
   let best=null,bd=60;offCars.forEach(c=>{offPos(c.u);const d=Math.hypot(PX-mx,PY-my);if(d<bd){bd=d;best=c}});
-  if(best)best.b=CFG.boostT;
+  if(best){SND.boost(best.b>0?.55:1,0);best.b=CFG.boostT}
 };
 function claimOffline(){
   const el=$('#off');if(el.classList.contains('out')||el.classList.contains('off'))return;
@@ -1393,7 +1732,7 @@ function loop(t){
   const dt=last?Math.min(.05,(t-last)/1000):0;last=t;
   S.tr.forEach((tr,i)=>{
     const r=R[i],sp=spd(i)/(CFG.lap*r.lf),cs=tr.cars;
-    const lap=c=>{const g=val(i,c.l);S.money+=g;gainAcc+=g;if(r.vis){pos(r,c.u);if(r.pops.length<10)r.pops.push({x:PX,y:PY-16,t:'+'+fmt(g),l:1});SND.lap(c.l,PX/r.W*2-1)}};
+    const lap=c=>{const g=val(i,c.l);S.money+=g;gainAcc+=g;if(r.vis){pos(r,c.u);if(r.pops.length<10)r.pops.push({x:PX,y:PY-16,t:'+'+fmt(g),l:1});const vf=viewFrac(r);if(vf>=.03)SND.lap(c.l,r.W?PX/r.W*2-1:0,vf)}};
     const norm=c=>{if(c.u>=1){c.u-=1;if(c.nl)c.nl=0;else lap(c)}else if(c.u<0){c.u+=1;c.nl=1}};
     cs.forEach(c=>{
       if(c.b>0)c.b-=dt;
@@ -1406,7 +1745,7 @@ function loop(t){
       c.v=Math.max(-9*sp,Math.min(14*sp,c.v));
       c.u+=c.v*dt;norm(c);
     });
-    if(cs.length>1){collideAll(cs,sp,(f,l)=>(chl(r,f)+chl(r,l))*.95/r.L);cs.forEach(norm)}
+    if(cs.length>1){collideAll(cs,sp,(f,l)=>(chl(r,f)+chl(r,l))*.95/r.L,(m,u)=>trackHit(r,m,u));cs.forEach(norm)}
     cs.forEach(c=>{
       if(c.s>.3&&r.vis){pos(r,c.u);const o=r.rw*.5/16*4.5;
         if(c.px!==undefined&&r.sk.length<260){const x0=-Math.sin(c.pa),y0=Math.cos(c.pa),x1=-Math.sin(PA),y1=Math.cos(PA);for(let q=-1;q<=1;q+=2)r.sk.push({a:c.px+x0*o*q,b:c.py+y0*o*q,c:PX+x1*o*q,d:PY+y1*o*q,l:1})}
