@@ -218,7 +218,6 @@ input.rg::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#
   </div>
   <div id="list"></div>
   <nav id="tabs">
-    <button class="tab on" data-t="home"><svg class="ic"><use href="#i-flag"/></svg>서킷</button>
     <button class="tab" data-t="dex"><svg class="ic"><use href="#i-grid"/></svg>도감</button>
     <button class="tab" data-t="rank"><svg class="ic"><use href="#i-trophy"/></svg>랭킹</button>
     <button class="tab" data-t="set"><svg class="ic"><use href="#i-gear"/></svg>설정</button>
@@ -251,7 +250,7 @@ input.rg::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#
 
 <script>
 // ===== 밸런스 (여기 숫자만 바꾸면 템포가 바뀝니다) =====
-const CFG={lap:10,need:3,vMul:3.3,maxLvl:20,drive:.9,bounce:2.2,hitDiv:1.7,slots:6,slotEvery:3/1.4,slotMax:11,baseP:8,pGrow:1.09,lvP:5,trackM:2.5,unlock:350,unlockG:6,upC:30,boostT:3,slowT:2.5,boostX:2.4,upG:2.8,upM:1.18,spdM:1.06,spdEvery:2,off:.2,maxTracks:12};
+const CFG={lap:10,need:3,vMul:3.3,maxLvl:20,drive:.9,bounce:2.2,hitDiv:1.7,slots:6,slotEvery:3/1.4,slotMax:11,baseP:8,pGrow:1.09,lvP:5,trackM:2.5,unlock:350,unlockG:6,upC:30,boostT:3,slowT:2.5,boostX:2.4,upG:2.8,upM:1.09,spdM:1.25,spdEvery:2,off:.2,maxTracks:12};
 const TH={
   asphalt:{bg:'#1b1f26',road:'#363c47',edge:'#cfd3da',line:'#fff',skid:'0,0,0'},
   neon:{bg:'#0f0b24',road:'#1b1440',edge:'#5b4de0',line:'#fff',skid:'150,130,255'},
@@ -592,7 +591,7 @@ function viewFrac(r){
 function trackHit(r,m,u){
   const n=performance.now();if(n-(r.hitT||0)<180||!r.vis)return;
   const v=viewFrac(r);if(v<.03)return;
-  r.hitT=n;pos(r,u);SND.crash(m,v,r.W?PX/r.W*2-1:0);
+  r.hitT=n;pos(r,u);burst(r,PX,PY,'#fff',Math.round(3+5*m));burst(r,PX,PY,'#ffb703',Math.round(3+6*m));SND.crash(m,v,r.W?PX/r.W*2-1:0);
 }
 let lockEl=null;
 function addCard(i){
@@ -624,13 +623,13 @@ function ui(){
   if(gainAcc>=.5&&performance.now()-gainT>600){spawnGain(gainAcc);gainAcc=0;gainT=performance.now()}
   if(lockEl){const c=unlockCost();setH(lockEl,`<p>다음 서킷은 수익이 ${CFG.trackM}배예요</p><button class="btn y" data-a="unlock" ${S.money<c?'disabled':''}>새 서킷 열기<small>${ic('coin')}${fmt(c)}</small></button>`)}
 }
-function toast(m){const t=$('#toast');t.textContent=m;t.classList.remove('show');void t.offsetWidth;t.classList.add('show')}
+function toast(m){if(/못|실패|정확히|입력해|사용 중|확인하지/.test(m))SND.sfx('err');const t=$('#toast');t.textContent=m;t.classList.remove('show');void t.offsetWidth;t.classList.add('show')}
 
 // ===== 수입 플로팅 =====
 let gainAcc=0,gainT=0;
 function spawnGain(v){const p=document.querySelector('.hud'),e=document.createElement('div');e.className='gain';e.textContent='+'+fmt(v);p.appendChild(e);setTimeout(()=>e.remove(),950)}
 
-// ===== 사운드: WebAudio 합성 (실제 줄 진동 모델링: 어쿠스틱 기타 + 몸통 공명 + 자연스러운 룸 잔향). 외부 파일 없음 =====
+// ===== 사운드: WebAudio 합성 (부드러운 첼레스타/종 계열 '뾰로롱' 음색 + 자연스러운 룸 잔향). 외부 파일 없음 =====
 // 사운드는 처음 한 번 오프라인으로 스테레오 버퍼에 렌더링해 두고 재생 → 음질은 높고 CPU는 거의 안 씀.
 const PENTA=[0,2,4,7,9];
 const SND=(()=>{
@@ -638,15 +637,15 @@ const SND=(()=>{
   const cache={};
   const vol=()=>S.snd===0?0:Math.pow(S.vol===undefined?.7:S.vol,1.6)*.6*.85;
   const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-  // 차 등급(Lv.1~20)마다 고유한 음 하나: A2(110Hz)에서 시작해 C장조 음계를 따라 한 칸씩 올라감 (최고 Lv.20 ≈ F#5)
-  const SC=[0,2,4,5,7,9,10],LVF=i=>110*Math.pow(2,(SC[i%7]+12*((i/7)|0))/12);
+  // 차 등급(Lv.1~20)마다 고유한 음 하나: A3(220Hz)에서 시작해 D장조 음계를 따라 한 칸씩 올라감 (최고 Lv.20 ≈ F#6)
+  const SC=[0,2,4,5,7,9,10],LVF=i=>660*Math.pow(2,(SC[i%7]+7*((i/7)|0))/12);
 
   // ---- 룸 잔향 IR: 초기 반사 + 고음부터 먼저 죽는 부드러운 꼬리 ----
   function mkIR(sec){
     const n=(SR*sec)|0,b=ac.createBuffer(2,n,SR),pd=(SR*.014)|0,er=[.019,.027,.041,.053,.068,.083,.101];
     for(let c=0;c<2;c++){
       const d=b.getChannelData(c);let y=0;
-      for(let i=pd;i<n;i++){const t=(i-pd)/(n-pd),k=.3+.66*Math.min(1,t*1.7);y=y*k+(Math.random()*2-1)*(1-k);d[i]=y*Math.exp(-4.2*t)*(1-t)}
+      for(let i=pd;i<n;i++){const t=(i-pd)/(n-pd),k=.3+.66*Math.min(1,t*1.7);y=y*k+(Math.random()*2-1)*(1-k);d[i]=y*Math.exp(-7*t)*(1-t)}
       er.forEach((s,j)=>{const p=(SR*(s+c*.0017))|0;if(p<n)d[p]+=(j%2?-1:1)*(.5-j*.045)*(c?.9:1)*.35});
     }
     return b;
@@ -718,6 +717,31 @@ const SND=(()=>{
       ks(tl,f*.9996,1.1,.4,.18,.5);ks(tr,f*1.0004,1.1,.4,.18,.5);
       for(let i=0;i<n;i++){L[o+i]+=tl[i]*v;R[o+i]+=tr[i]*v}
     },
+    // 부드러운 종·첼레스타: 맑은 기본음 + 위 부분음은 빨리 사라져서 쏘지 않고 말랑하게. 아주 작은 말렛 톡 + 좌우 미세 디튠으로 번지는 반짝임
+    chm(L,R,o,f,v){
+      const k=tsc(f,.35,.5,1.3); // 낮은 음일수록 조금 더 길게 울림
+      // 실제 종/글로켄슈필처럼 비정수배 부분음(2.76, 5.4, 8.9)이 맑게 반짝이고 금방 사라짐
+      modal(L,R,o,f,[[1,1,.8],[2.0,.16,.32],[2.76,.07,.16],[5.4,.015,.07]],v,k*.6,.004,.003);
+      click(L,R,o,2200,.003,.005*v);
+    },
+    // 동전 잘그락: 짧게 죽는 금속 부분음 + 부딪히는 노이즈를 여러 번 불규칙하게 (유리처럼 길게 울리지 않음)
+    clink(L,R,o,f,v,x){const n=x||5;let t=0;for(let i=0;i<n;i++){const ff=f*(.75+Math.random()*.6),a=v*(.45+.55*Math.random()),oo=o+((t*SR)|0);
+      modal(L,R,oo,ff,[[1,1,.014],[1.62,.55,.011],[2.41,.38,.008],[3.37,.22,.006]],a,1,.0003,.004);
+      click(L,R,oo,4800,.0025,.12*a);t+=.012+Math.random()*.03}},
+    // 동전 '칭': 짧게 죽는 부드러운 금속음
+    ting(L,R,o,f,v){modal(L,R,o,f,[[1,1,.07],[2.74,.3,.03],[4.2,.07,.015]],v,1,.001,.002)},
+    // 부드럽고 둥근 한 음 (시스템/코인용): 위 배음 거의 없음, 부드러운 시작
+    soft(L,R,o,f,v){modal(L,R,o,f,[[1,1,.06],[2,.1,.025]],v,1,.005,.0015)},
+    // 퐁: 음높이가 살짝 올라가며 사라지는 동그란 물방울 소리
+    pop(L,R,o,f,v){const n=Math.min(L.length-o,(SR*.3)|0);let ph=0;for(let i=0;i<n;i++){const t=i/SR,fr=f*(1+.6*(1-Math.exp(-t/.025)));ph+=2*Math.PI*fr/SR;const x=Math.sin(ph)*Math.exp(-t/.05)*Math.min(1,t/.003)*v;L[o+i]+=x;R[o+i]+=x}},
+    // 뽁: 물방울/비누방울이 터지는 소리 (음정 없는 짧은 공명 노이즈 + 아주 작은 낮은 울림)
+    bub(L,R,o,f,v){const n=Math.min(L.length-o,(SR*.12)|0);let ph=0,lo=0,bd=0,nz=0;
+      for(let i=0;i<n;i++){const t=i/SR,fr=f*(.85+.5*(1-Math.exp(-t/.012)));ph+=2*Math.PI*fr/SR;
+        // 아주 부드럽게 거른 노이즈를 살짝만 섞어 '전자음' 티를 줄임 (거친 지직임 방지)
+        nz+=.18*((Math.random()*2-1)-nz);const ff=2*Math.sin(Math.PI*fr*1.1/SR);lo+=ff*bd;const hi=nz-lo-bd/6;bd+=ff*hi;
+        const env=Math.exp(-t/.02)*Math.min(1,t/.002),x=(Math.sin(ph)*.8+Math.sin(2*ph)*.08+bd*1.2)*env*v;L[o+i]+=x;R[o+i]+=x}},
+    // 도톰한 한 음: 기본음 + 한 옥타브 아래 + 부드러운 배음 (얇지 않게)
+    full(L,R,o,f,v){modal(L,R,o,f,[[1,1,.1],[2,.5,.07],[3,.26,.045],[4,.1,.03],[1.5,.16,.06]],v,1,.003,.002);click(L,R,o,1800,.006,.1*v)},
     // 나무 톡 (구매 시 '딸깍' 질감)
     tok(L,R,o,f,v){modal(L,R,o,f,[[1,1,.05],[2.33,.5,.03],[4.1,.25,.015]],v,1,.001,.0008);click(L,R,o,1800,.008,.16*v)},
     // 묵직한 쿵: 피치가 떨어지는 사인 + 2배음 + 낮은 충격음
@@ -747,34 +771,44 @@ const SND=(()=>{
     const n=(SR*dur)|0,L=new Float32Array(n),R=new Float32Array(n);
     layers.forEach(([k,f,t,v,x])=>V[k](L,R,(t*SR)|0,f,v,x));
     let m=1e-6;for(let i=0;i<n;i++){const a=Math.abs(L[i]),b=Math.abs(R[i]);if(a>m)m=a;if(b>m)m=b}
-    // 부드러운 새츄레이션: 줄 튕기는 순간의 뾰족한 어택을 눌러 주고 뒤의 울림은 키워 줌 (따뜻하고 꽉 찬 소리)
-    let m2=1e-6;for(let i=0;i<n;i++){L[i]=Math.tanh(1.8*L[i]/m);R[i]=Math.tanh(1.8*R[i]/m);const a=Math.abs(L[i]),b=Math.abs(R[i]);if(a>m2)m2=a;if(b>m2)m2=b}
+    // 아주 약한 새츄레이션: 어택의 뾰족함만 살짝 눌러 줌
+    let m2=1e-6;for(let i=0;i<n;i++){L[i]=Math.tanh(1.1*L[i]/m);R[i]=Math.tanh(1.1*R[i]/m);const a=Math.abs(L[i]),b=Math.abs(R[i]);if(a>m2)m2=a;if(b>m2)m2=b}
     m=m2;
     const g=peak/m,fo=(SR*.04)|0;
     for(let i=0;i<n;i++){const w=i>n-fo?(n-i)/fo:1;L[i]*=g*w;R[i]*=g*w}
     const b=ac.createBuffer(2,n,SR);b.getChannelData(0).set(L);b.getChannelData(1).set(R);return b;
   }
   const arpL=(inst,notes,t0,gap,v)=>notes.map((f,i)=>[inst,f,t0+i*gap,v]);
-  // 스트럼: 낮은 줄부터 위로 순서대로 살짝씩 늦게 (손으로 쓸어내리는 느낌)
-  const strum=(notes,t0,gap,v)=>notes.map((f,i)=>['gtr',f,t0+i*gap+Math.random()*.004,v*(1-i*.04)]);
-  const CM=[261.63,329.63,392,523.25];            // C 메이저 아르페지오 (이전보다 한 옥타브 아래)
-  const CO=[98,130.81,164.81,196,261.63,329.63];          // 낮은 오픈 C 보이싱 (G2 C3 E3 G3 C4 E4)
+  // 효과음 음계: D장조 펜타토닉(레·미·파#·라·시) — 어떤 음이 겹쳐도 잘 어울리고 귀에 편함
+  const D5=880,Fs5=1108.73,A5=1318.51,D6=1760,Fs6=2217.46;
   const BUILD={
-    buy:()=>render(1.8,[['tok',260,0,.45],...arpL('gtr',[146.83,196,293.66],.01,.08,1),['har',587.3,.22,.1]],.6),
-    merge:()=>render(3.2,[['swell',.32,0,.16],...strum([130.81,196,261.63,329.63,392],.04,.03,.9),...arpL('gtr',CM.slice(0,4),.22,.1,.6),['har',784,.65,.12]],.7),
-    up:()=>render(2.6,[['swell',.22,0,.1],...arpL('gtr',[196,246.94,293.66,392],.02,.085,.9),['har',587.3,.34,.12]],.64),
-    track:()=>render(4.6,[['thump',0,0,.8],...strum(CO,.05,.035,.95),...arpL('gtr',CM,.45,.11,.6),['har',784,1,.12]],.78),
-    land:()=>render(4.2,[['thump',0,0,.9],...strum(CO,.02,.032,.95),...arpL('gtr',CM.slice(2),.38,.1,.5)],.82)
+    buy:()=>render(1.8,[['chm',Fs5,0,.85],['chm',A5,.075,.8]],.6),
+    merge:()=>render(2.8,[...arpL('chm',[D5,Fs5,A5,D6,Fs6],0,.075,.8),['chm',D5,.4,.28],['chm',A5,.4,.24],['chm',D6,.4,.2]],.66),
+    up:()=>render(2.2,[...arpL('chm',[660,D5,Fs5,A5],0,.085,.85),['chm',D6,.34,.28]],.62),
+    track:()=>render(3.6,[['chm',440,0,.7],...arpL('chm',[D5,Fs5,A5,D6,Fs6],.06,.085,.7),['chm',A5,.5,.3],['chm',D6,.5,.26]],.7),
+    reward:()=>render(3.2,[...arpL('chm',[D5,A5,D6,Fs6],0,.08,.7),['chm',A5,.34,.3],['chm',D6,.34,.24]],.66),
+    tap:()=>render(.3,[['soft',1000,0,1]],.3),
+    open:()=>render(.3,[['soft',1000,0,1]],.3),
+    close:()=>render(.3,[['soft',1000,0,1]],.3),
+    ok:()=>render(.3,[['soft',1000,0,1]],.3),
+    err:()=>render(.3,[['soft',650,0,1]],.3),
+    login:()=>render(.3,[['soft',1000,0,1]],.3),
+    coin:()=>render(.6,[['swell',.16,0,.06],['full',1060,.07,.8],['full',1410,.14,1]],.4),
+    land:()=>render(3.4,[['chm',440,0,.8],['chm',D5,.03,.6],['chm',A5,.06,.5],...arpL('chm',[Fs5,A5,D6,Fs6],.24,.095,.6)],.74)
   };
   function get(key){
     if(cache[key])return cache[key];
     let b;
     if(BUILD[key])b=BUILD[key]();
-    else{const i=+key.slice(3),f=LVF(i);b=key[0]==='g'?render(2.4,[['gtr',f,0,1,1.7]],.66):render(1.4,[['har',f*2,0,1]],.42)}
+    else{ // 'chm'+번호: 그 등급 차의 고유 음 (높은 등급은 위 옥타브 반짝임을 아주 살짝 얹음)
+      const i=+key.slice(3),f=LVF(i),ly=[['chm',f,0,1]];
+      if(i>=11&&f*2<=2000)ly.push(['chm',f*2,.03,.14]);
+      b=render(2.6,ly,.66);
+    }
     return cache[key]=b;
   }
   function warm(){ // 첫 터치 직후 한꺼번에 렌더링하면 버벅일 수 있어 조금씩 나눠서 미리 준비
-    const keys=[];for(let i=0;i<20;i++)keys.push('gtr'+i);['buy','merge','up','track','land'].forEach(k=>keys.push(k));for(let i=11;i<20;i++)keys.push('har'+i);
+    const keys=[];for(let i=0;i<20;i++)keys.push('chm'+i);['buy','merge','up','track','land','coin','reward','tap','open','close','ok','err','login'].forEach(k=>keys.push(k));
     let j=0;(function step(){if(!ac||j>=keys.length)return;try{get(keys[j++])}catch(e){}setTimeout(step,70)})();
   }
 
@@ -783,7 +817,7 @@ const SND=(()=>{
     o=o||{};const s=ac.createBufferSource();s.buffer=buf;if(o.rate)s.playbackRate.value=o.rate;
     const g=ac.createGain();g.gain.value=o.v===undefined?1:o.v;const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=o.lp||4200;lp.Q.value=.5;s.connect(g);g.connect(lp);let out=lp;
     if(o.pan&&ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=clamp(o.pan,-.8,.8);lp.connect(p);out=p}
-    send(out,o.wet===undefined?.35:o.wet);s.start(t);
+    send(out,o.wet===undefined?.15:o.wet);s.start(t);
   }
   function send(node,wet){node.connect(dry);if(wet>0){const w=ac.createGain();w.gain.value=wet;node.connect(w);w.connect(conv)}}
   function noiseSrc(t,dur){const s=ac.createBufferSource();s.buffer=nb;s.loop=true;s.start(t,Math.random()*1.5);s.stop(t+dur+.05);return s}
@@ -878,11 +912,11 @@ const SND=(()=>{
     try{ac=new AC()}catch(e){return false}
     SR=ac.sampleRate;
     master=ac.createGain();master.gain.value=vol();
-    const air=ac.createBiquadFilter();air.type='highshelf';air.frequency.value=9000;air.gain.value=-3; // 귀 아픈 고음 살짝 정리
+    const air=ac.createBiquadFilter();air.type='highshelf';air.frequency.value=9000;air.gain.value=-5; // 귀 아픈 고음 살짝 정리
     const cp=ac.createDynamicsCompressor();cp.threshold.value=-20;cp.knee.value=20;cp.ratio.value=5;cp.attack.value=.004;cp.release.value=.25;
     master.connect(air);air.connect(cp);cp.connect(ac.destination);
     dry=ac.createGain();dry.connect(master);
-    conv=ac.createConvolver();conv.buffer=mkIR(3.4);const wg=ac.createGain();wg.gain.value=.95;conv.connect(wg);wg.connect(master);
+    conv=ac.createConvolver();conv.buffer=mkIR(1.1);const wg=ac.createGain();wg.gain.value=.5;conv.connect(wg);wg.connect(master);
     nb=ac.createBuffer(1,SR*2,SR);{const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
     setTimeout(warm,60);
     return true;
@@ -895,18 +929,17 @@ const SND=(()=>{
   }
   return{
     unlock,ctx:()=>ac,get,
-    // 한 바퀴: 그 차 등급 고유의 기타 음 하나 (Lv.12 이상은 은은한 배음 추가). 동시 발음 제한.
+    // 한 바퀴: 그 차 등급 고유의 종 음 하나 (Lv.12 이상은 위 옥타브 반짝임이 아주 살짝 얹힘). 동시 발음 제한.
     lap(l,pan,vis){
       if(vis===undefined)vis=1;
       if(!ready())return;
       const now=ac.currentTime;if(now-last>.12){last=now;cnt=0}if(++cnt>3)return;
-      const i=clamp((l|0)-1,0,19),p=pan*.6,tp=1-.3*i/19; // 등급이 높을수록(높은 음일수록) 살짝 작게
-      play(get('gtr'+i),now+.005,{v:.78*tp*vis,pan:p,wet:.5});
-      if(l>=12)play(get('har'+i),now+.04,{v:.12*vis,pan:p,wet:.4});
+      const p=pan*.6; // 모든 등급 같은 동전 소리 (음높이만 살짝 흔들림)
+      play(get('coin'),now+.005,{v:.7*vis,pan:p,wet:.03,lp:3200,rate:.97+Math.random()*.06})
     },
     sfx(n){
       if(!ready()||!BUILD[n])return;
-      play(get(n),ac.currentTime+.005,{v:.8,lp:3800,wet:n==='track'?.62:.52});
+      play(get(n),ac.currentTime+.005,{v:.8,lp:4200,wet:n==='track'?.3:.22});
     },
     // 부스트 사용: 엔진 + 터보 소리 (v: 크기 0~1)
     boost(v,pan){
@@ -925,7 +958,7 @@ const SND=(()=>{
       if(!ready())return;const now=ac.currentTime;
       whoosh(now+.02);
       skid(now+t0+.25,Math.max(.5,D-.4));
-      play(get('land'),now+t0+D,{v:.8,lp:3800,wet:.62});
+      play(get('land'),now+t0+D,{v:.8,lp:4200,wet:.3});
     }
   };
 })();
@@ -1086,7 +1119,7 @@ function fxFrame(now){
     const cs=Math.cos(h),sn=Math.sin(h),rx=px-cs*26*sc,ry=py-sn*26*sc,ox=-sn*11*sc,oy=cs*11*sc;
     const L={x:rx+ox,y:ry+oy},Rr={x:rx-ox,y:ry-oy};
     if(Math.abs(slip)>.18&&p<.97&&p>0){
-      if(run.pl&&run.marks.length<240){run.marks.push({a:run.pl.x,b:run.pl.y,c:L.x,d:L.y,l:1,w:Math.max(2,5*sc)});run.marks.push({a:run.pr.x,b:run.pr.y,c:Rr.x,d:Rr.y,l:1,w:Math.max(2,5*sc)})}
+      if(run.pl&&run.marks.length<240){run.marks.push({a:run.pl.x,b:run.pl.y,c:L.x,d:L.y,l:1,w:Math.max(.8,1.5*sc)});run.marks.push({a:run.pr.x,b:run.pr.y,c:Rr.x,d:Rr.y,l:1,w:Math.max(.8,1.5*sc)})}
       run.pl=L;run.pr=Rr;
       [L,Rr].forEach(q=>{if(run.smoke.length<24&&Math.random()<.28)run.smoke.push({x:q.x,y:q.y,vx:(Math.random()-.5)*40-cs*30,vy:(Math.random()-.5)*40-sn*30,r:4*sc,l:1,s:sc})});
     }else{run.pl=null;run.pr=null}
@@ -1094,7 +1127,7 @@ function fxFrame(now){
   // 타이어 자국
   g.lineCap='round';
   run.marks.forEach(m=>{m.l-=dt*.6});run.marks=run.marks.filter(m=>m.l>0);
-  run.marks.forEach(m=>{g.strokeStyle='rgba(255,255,255,'+(.1*m.l)+')';g.lineWidth=m.w+3;g.beginPath();g.moveTo(m.a,m.b);g.lineTo(m.c,m.d);g.stroke();
+  run.marks.forEach(m=>{g.strokeStyle='rgba(255,255,255,'+(.06*m.l)+')';g.lineWidth=m.w+1;g.beginPath();g.moveTo(m.a,m.b);g.lineTo(m.c,m.d);g.stroke();
     g.strokeStyle='rgba(8,9,12,'+(.7*m.l)+')';g.lineWidth=m.w;g.beginPath();g.moveTo(m.a,m.b);g.lineTo(m.c,m.d);g.stroke()});
   // 연기
   run.smoke.forEach(s=>{s.x+=s.vx*dt;s.y+=s.vy*dt;s.vx*=.96;s.vy*=.96;s.r+=dt*22*s.s;s.l-=dt*1.5});
@@ -1179,7 +1212,8 @@ function dexFrame(t){
   });
 }
 function openTab(t){
-  tab=(t===tab&&t!=='home')?'home':t;
+  const was=tab;tab=(t===tab&&t!=='home')?'home':t;
+  SND.sfx(tab==='home'?'close':was==='home'?'open':'tap');
   if(tab!=='rank'&&rkOff){rkOff();rkOff=null}
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
   $('#sheet').classList.toggle('open',tab!=='home');
@@ -1480,7 +1514,7 @@ async function onAuth(){
     toast(ok?(c?'이 기기 진행으로 저장했어요':'게스트 진행을 계정으로 옮겼어요'):'계정에 연결했어요. 서버 저장은 곧 다시 시도해요');
   }catch(e){toast('계정 정보를 불러오지 못했어요 ('+String(e&&e.code||e)+')')}
   finally{
-    authBusy=false;if(m.user)closeLogin();refreshAcct();
+    authBusy=false;if(m.user){if(!$('#login').classList.contains('off'))SND.sfx('login');closeLogin()}refreshAcct();
     if(authAgain){authAgain=false;onAuth()}
   }
 }
@@ -1660,12 +1694,12 @@ function renderSet(){
       }
       btn.disabled=false;
     }
-    S.nick=v;save();avPaint();mpSend(true);cloudPush();toast('저장했어요');
+    S.nick=v;save();avPaint();mpSend(true);cloudPush();toast('저장했어요');SND.sfx('ok');
   };
   $('#avPick').onclick=()=>$('#avFile').click();
   $('#avFile').onchange=async e=>{
     const f=e.target.files[0];e.target.value='';if(!f)return;
-    try{S.av=await avFromFile(f);save();avPaint();mpSend(true);cloudPush();toast('프로필 사진을 바꿨어요')}
+    try{S.av=await avFromFile(f);save();avPaint();mpSend(true);cloudPush();toast('프로필 사진을 바꿨어요');SND.sfx('ok')}
     catch(err){toast('사진을 불러오지 못했어요')}
   };
   $('#avDel').onclick=()=>{S.av='';save();avPaint();mpSend(true);cloudPush()};
@@ -1735,7 +1769,7 @@ $('#offcv').onclick=e=>{
 };
 function claimOffline(){
   const el=$('#off');if(el.classList.contains('out')||el.classList.contains('off'))return;
-  gainAcc+=S.pend||0;S.money+=S.pend||0;S.pend=0;save();ui();
+  gainAcc+=S.pend||0;S.money+=S.pend||0;S.pend=0;save();ui();SND.sfx('reward');
   el.classList.add('out');setTimeout(()=>{el.classList.remove('out');el.classList.add('off')},320);
 }
 $('#offBtn').onclick=claimOffline;
