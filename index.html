@@ -522,6 +522,25 @@ function drawCar(cx,l){
   if(!SPR[l]){const cv=document.createElement('canvas');cv.width=320;cv.height=192;const g=cv.getContext('2d');g.translate(160,96);g.scale(4,4);paintCar(g,l);SPR[l]=cv}
   cx.drawImage(SPR[l],-40,-24,80,48);
 }
+const SPRY=[];
+function drawFlame(cx,l,k){ // 부스트 중 차 뒤꽁무니 양쪽에서 작게 깜빡이는 불꽃 두 개 (차 아래에 그려서 배기구에서 나오는 느낌)
+  const d=CAR[Math.min(l,20)]||CAR[1],n=d.n,t=performance.now()/1000,e=k*k,x0=-n+2;
+  cx.save();
+  [-1,1].forEach((sd,i)=>{
+    const fl=1+.22*Math.sin(t*47+l+i*2.1)+.14*Math.sin(t*81+l*2+i*1.3),len=6.5*e*fl,w=1.9*e,y=sd*d.w*.45;
+    cx.save();cx.translate(0,y);
+    const gr=cx.createLinearGradient(x0,0,x0-len,0);gr.addColorStop(0,'rgba(255,196,60,.9)');gr.addColorStop(.55,'rgba(255,120,20,.65)');gr.addColorStop(1,'rgba(255,70,0,0)');
+    cx.fillStyle=gr;cx.beginPath();cx.moveTo(x0,-w);cx.quadraticCurveTo(x0-len*.55,-w*.8,x0-len,0);cx.quadraticCurveTo(x0-len*.55,w*.8,x0,w);cx.closePath();cx.fill();
+    cx.fillStyle='rgba(255,238,170,'+(.8*e)+')';cx.beginPath();cx.moveTo(x0,-w*.45);cx.quadraticCurveTo(x0-len*.3,-w*.35,x0-len*.5,0);cx.quadraticCurveTo(x0-len*.3,w*.35,x0,w*.45);cx.closePath();cx.fill();
+    cx.restore();
+  });
+  cx.restore();
+}
+function drawTint(cx,l,k){ // 차 모양 그대로 노란 색을 얹음 (k: 부스트 정도)
+  l=Math.min(l,20);const sp=SPR[l];if(!sp)return;
+  if(!SPRY[l]){const cv=document.createElement('canvas');cv.width=sp.width;cv.height=sp.height;const g=cv.getContext('2d');g.drawImage(sp,0,0);g.globalCompositeOperation='source-atop';g.fillStyle='#ffb400';g.fillRect(0,0,cv.width,cv.height);SPRY[l]=cv}
+  cx.globalAlpha=.2*k;cx.drawImage(SPRY[l],-40,-24,80,48);cx.globalAlpha=1;
+}
 const mass=c=>1+.12*(c.l-1);
 function collideAll(cs,sp,Dof,onHit){
   const ord=cs.slice().sort((a,b)=>a.u-b.u),n=ord.length;
@@ -549,7 +568,7 @@ function drawR(r){
   const one=c=>{
     if(FXHIDE.has(c))return;
     const sc=sz(c);pos(r,c.u);const x=PX,y=PY;
-    cx.save();cx.translate(x,y);cx.rotate(PA+(c.wa||0)*Math.sin((c.wt||0)*22));cx.scale(sc,sc);drawCar(cx,c.l);cx.restore();
+    cx.save();cx.translate(x,y);cx.rotate(PA+(c.wa||0)*Math.sin((c.wt||0)*22));cx.scale(sc,sc);if(c.s>.25)drawFlame(cx,c.l,c.s);drawCar(cx,c.l);if(c.s>.03)drawTint(cx,c.l,c.s);cx.restore();
   };
   const inB=c=>{if(!r.br)return false;const m=chl(r,c)*1.15/r.L;return c.u>=r.br[0]-m&&c.u<=r.br[1]+m};
   t.cars.forEach(c=>{if(!inB(c))one(c)});
@@ -619,8 +638,8 @@ const SND=(()=>{
   const cache={};
   const vol=()=>S.snd===0?0:Math.pow(S.vol===undefined?.7:S.vol,1.6)*.6*.85;
   const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
-  // 차 등급(Lv.1~20)마다 고유한 음 하나: G2(98Hz)에서 시작해 C장조 음계를 따라 한 칸씩 올라감 (최고 Lv.20 ≈ E5)
-  const SC=[0,2,4,5,7,9,10],LVF=i=>98*Math.pow(2,(SC[i%7]+12*((i/7)|0))/12);
+  // 차 등급(Lv.1~20)마다 고유한 음 하나: A2(110Hz)에서 시작해 C장조 음계를 따라 한 칸씩 올라감 (최고 Lv.20 ≈ F#5)
+  const SC=[0,2,4,5,7,9,10],LVF=i=>110*Math.pow(2,(SC[i%7]+12*((i/7)|0))/12);
 
   // ---- 룸 잔향 IR: 초기 반사 + 고음부터 먼저 죽는 부드러운 꼬리 ----
   function mkIR(sec){
@@ -793,66 +812,63 @@ const SND=(()=>{
   }
 
   function panOut(node,pan){if(pan&&ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=clamp(pan,-.8,.8);node.connect(p);return p}return node}
-  // 부스트: 엔진 회전수가 치솟는 '부우웅' + 터보 휘파람 + 끝에 블로오프 '취익'
+  // 부스트: 엔진 회전수가 치솟는 '부우웅' → 힘차게 유지되다가 → 서서히 가라앉는 여운 + 터보 휘파람 + 블로오프 '취익'
   function boostSnd(t,v,pan){
-    const D=1.5,o=ac.createGain();o.gain.value=v*1.25;
+    const D=2.6,o=ac.createGain();o.gain.value=v*1.0625;
     const f=ac.createBiquadFilter();f.type='lowpass';f.Q.value=3;
-    f.frequency.setValueAtTime(260,t);f.frequency.exponentialRampToValueAtTime(2600,t+.9);f.frequency.exponentialRampToValueAtTime(900,t+D);
+    f.frequency.setValueAtTime(260,t);f.frequency.exponentialRampToValueAtTime(2600,t+.9);f.frequency.exponentialRampToValueAtTime(2000,t+1.5);f.frequency.exponentialRampToValueAtTime(500,t+D);
     const am=ac.createGain();am.gain.value=.7;
-    const lf=ac.createOscillator(),ld=ac.createGain();lf.frequency.setValueAtTime(20,t);lf.frequency.exponentialRampToValueAtTime(70,t+.9);ld.gain.value=.3;lf.connect(ld);ld.connect(am.gain);lf.start(t);lf.stop(t+D+.05);
-    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.26,t+.1);g.gain.setValueAtTime(.26,t+.8);g.gain.exponentialRampToValueAtTime(.0001,t+D);
+    const lf=ac.createOscillator(),ld=ac.createGain();lf.frequency.setValueAtTime(20,t);lf.frequency.exponentialRampToValueAtTime(70,t+.9);lf.frequency.exponentialRampToValueAtTime(34,t+D);ld.gain.value=.3;lf.connect(ld);ld.connect(am.gain);lf.start(t);lf.stop(t+D+.05);
+    const g=ac.createGain();g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.26,t+.1);g.gain.setValueAtTime(.26,t+1.2);g.gain.linearRampToValueAtTime(.15,t+1.8);g.gain.exponentialRampToValueAtTime(.0001,t+D);
     [[1,'sawtooth',1],[1.007,'sawtooth',1],[.5,'square',.5]].forEach(([m,ty,a])=>{
       const os=ac.createOscillator(),og=ac.createGain();os.type=ty;og.gain.value=a;
-      os.frequency.setValueAtTime(55*m,t);os.frequency.exponentialRampToValueAtTime(230*m,t+.9);os.frequency.exponentialRampToValueAtTime(170*m,t+D);
+      os.frequency.setValueAtTime(55*m,t);os.frequency.exponentialRampToValueAtTime(230*m,t+.9);os.frequency.exponentialRampToValueAtTime(200*m,t+1.5);os.frequency.exponentialRampToValueAtTime(115*m,t+D);
       os.connect(og);og.connect(f);os.start(t);os.stop(t+D+.05);
     });
     f.connect(am);am.connect(g);g.connect(o);
     // 바람 가르는 소리
     const s=noiseSrc(t,D),bp=ac.createBiquadFilter();bp.type='bandpass';bp.Q.value=.8;
-    bp.frequency.setValueAtTime(500,t);bp.frequency.exponentialRampToValueAtTime(3600,t+.9);
-    const ng=ac.createGain();ng.gain.setValueAtTime(.0001,t);ng.gain.linearRampToValueAtTime(.22,t+.7);ng.gain.exponentialRampToValueAtTime(.0001,t+D);
+    bp.frequency.setValueAtTime(500,t);bp.frequency.exponentialRampToValueAtTime(3600,t+.9);bp.frequency.exponentialRampToValueAtTime(1400,t+D);
+    const ng=ac.createGain();ng.gain.setValueAtTime(.0001,t);ng.gain.linearRampToValueAtTime(.22,t+.7);ng.gain.setValueAtTime(.22,t+1.1);ng.gain.exponentialRampToValueAtTime(.0001,t+D);
     s.connect(bp);bp.connect(ng);ng.connect(o);
-    // 터보 휘파람
-    const w=ac.createOscillator(),wg=ac.createGain();w.type='sine';w.frequency.setValueAtTime(1700,t+.05);w.frequency.exponentialRampToValueAtTime(4300,t+.9);
-    wg.gain.setValueAtTime(.0001,t);wg.gain.linearRampToValueAtTime(.03,t+.6);wg.gain.exponentialRampToValueAtTime(.0001,t+1);
-    w.connect(wg);wg.connect(o);w.start(t);w.stop(t+1.05);
-    // 블로오프 밸브
-    const s2=noiseSrc(t+.9,.35),hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=3200;
-    const bg=ac.createGain();bg.gain.setValueAtTime(.0001,t+.9);bg.gain.linearRampToValueAtTime(.18,t+.93);bg.gain.exponentialRampToValueAtTime(.0001,t+1.25);
+    // 터보 휘파람 (올라갔다가 천천히 내려옴)
+    const w=ac.createOscillator(),wg=ac.createGain();w.type='sine';w.frequency.setValueAtTime(1700,t+.05);w.frequency.exponentialRampToValueAtTime(4300,t+.9);w.frequency.exponentialRampToValueAtTime(2400,t+1.8);
+    wg.gain.setValueAtTime(.0001,t);wg.gain.linearRampToValueAtTime(.03,t+.6);wg.gain.exponentialRampToValueAtTime(.0001,t+1.8);
+    w.connect(wg);wg.connect(o);w.start(t);w.stop(t+1.85);
+    // 블로오프 밸브: 가속이 한풀 꺾일 때 '취익'
+    const s2=noiseSrc(t+1.5,.45),hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=3200;
+    const bg=ac.createGain();bg.gain.setValueAtTime(.0001,t+1.5);bg.gain.linearRampToValueAtTime(.18,t+1.54);bg.gain.exponentialRampToValueAtTime(.0001,t+1.95);
     s2.connect(hp);hp.connect(bg);bg.connect(o);
-    send(panOut(o,pan),.18);
+    send(panOut(o,pan),.22);
   }
-  // 충돌: 묵직한 차체 충격 + 우그러지는 왜곡 와그작 + 철판 찢김 + 튀는 파편 + 낮은 울림 (세기 m 에 따라 크기·길이 변화)
-  let distC=null;
-  function dist(){if(!distC){distC=new Float32Array(512);for(let i=0;i<512;i++)distC[i]=Math.tanh(5*(i/256-1))}const w=ac.createWaveShaper();w.curve=distC;return w}
+  // 충돌: 범퍼끼리 부딪히는 소리 = 묵직한 '쿵' + 속 빈 차체 '퍽' + 플라스틱 갈라지는 '빠각' + 짧은 금속 '팅' + 낮은 울림
+  // (세기 m 에 따라 크기·길이 변화)
   function crashSnd(t,m,v,pan){
-    const o=ac.createGain();o.gain.value=(.55+.45*m)*v*1.5;
-    // 1) 차체가 부딪히는 묵직한 충격
-    const b=ac.createOscillator(),bg=ac.createGain();b.type='sine';b.frequency.setValueAtTime(190,t);b.frequency.exponentialRampToValueAtTime(34,t+.24);
-    bg.gain.setValueAtTime(.0001,t);bg.gain.linearRampToValueAtTime(.9,t+.003);bg.gain.exponentialRampToValueAtTime(.0001,t+.34);
-    b.connect(bg);bg.connect(o);b.start(t);b.stop(t+.36);
-    // 2) 우그러지는 와그작: 찌그러뜨린(왜곡) 노이즈를 시간차로 세 번
-    [[0,.16,.55],[.04,.13,.4],[.095,.12,.3]].forEach(([dl,dc,a])=>{
-      const s=noiseSrc(t+dl,dc+.05),bp=ac.createBiquadFilter();bp.type='bandpass';bp.frequency.value=700+Math.random()*1500;bp.Q.value=.7;
-      const ws=dist(),sg=ac.createGain();sg.gain.setValueAtTime(.0001,t+dl);sg.gain.linearRampToValueAtTime(a,t+dl+.002);sg.gain.exponentialRampToValueAtTime(.0001,t+dl+dc);
-      s.connect(bp);bp.connect(ws);ws.connect(sg);sg.connect(o);
+    const o=ac.createGain();o.gain.value=(.55+.45*m)*v*1.38;
+    // 쿵
+    const b=ac.createOscillator(),bg=ac.createGain();b.type='sine';b.frequency.setValueAtTime(150,t);b.frequency.exponentialRampToValueAtTime(52,t+.13);
+    bg.gain.setValueAtTime(.0001,t);bg.gain.linearRampToValueAtTime(.8,t+.003);bg.gain.exponentialRampToValueAtTime(.0001,t+.22);
+    b.connect(bg);bg.connect(o);b.start(t);b.stop(t+.24);
+    // 퍽: 속 빈 차체가 울리는 중저음 노이즈
+    const s1=noiseSrc(t,.12),f1=ac.createBiquadFilter();f1.type='bandpass';f1.frequency.value=600+Math.random()*150;f1.Q.value=1.2;
+    const g1=ac.createGain();g1.gain.setValueAtTime(.0001,t);g1.gain.linearRampToValueAtTime(.5,t+.002);g1.gain.exponentialRampToValueAtTime(.0001,t+.1);
+    s1.connect(f1);f1.connect(g1);g1.connect(o);
+    // 빠각: 플라스틱이 갈라지는 짧은 소리 세 번
+    const s2=noiseSrc(t,.14),f2=ac.createBiquadFilter();f2.type='bandpass';f2.frequency.value=2400+Math.random()*1200;f2.Q.value=2;
+    const g2=ac.createGain();g2.gain.setValueAtTime(.0001,t);
+    [[0,.3],[.026,.22],[.062,.15]].forEach(([d,a])=>{g2.gain.linearRampToValueAtTime(a,t+d+.002);g2.gain.exponentialRampToValueAtTime(.0001,t+d+.024)});
+    s2.connect(f2);f2.connect(g2);g2.connect(o);
+    // 팅: 부딪힌 금속 부품이 짧게 울림
+    const base=520+Math.random()*180;
+    [[1,.1],[2.76,.06]].forEach(([r,a])=>{
+      const os=ac.createOscillator(),og=ac.createGain();os.type='triangle';os.frequency.value=base*r;
+      og.gain.setValueAtTime(.0001,t);og.gain.linearRampToValueAtTime(a*(.6+.4*m),t+.002);og.gain.exponentialRampToValueAtTime(.0001,t+.25*(.7+.5*m));
+      os.connect(og);og.connect(o);os.start(t);os.stop(t+.4);
     });
-    // 3) 철판이 찢기는 금속 소리
-    const base=300+Math.random()*220;
-    [[1,.16,.42],[2.42,.12,.3],[3.87,.08,.22],[5.4,.05,.15]].forEach(([r,a,d],k)=>{
-      const os=ac.createOscillator(),og=ac.createGain();os.type=k?'triangle':'sawtooth';os.frequency.value=base*r;
-      og.gain.setValueAtTime(.0001,t);og.gain.linearRampToValueAtTime(a*(.6+.4*m),t+.002);og.gain.exponentialRampToValueAtTime(.0001,t+d*(.8+.5*m));
-      os.connect(og);og.connect(o);os.start(t);os.stop(t+d*1.4);
-    });
-    // 4) 튀는 파편 소리 (짧은 고음 톡톡톡)
-    const s3=noiseSrc(t,.5),hp=ac.createBiquadFilter();hp.type='highpass';hp.frequency.value=3000;
-    const dg=ac.createGain();dg.gain.setValueAtTime(.0001,t);
-    let tk=t+.04;for(let k=0;k<6;k++){dg.gain.linearRampToValueAtTime((.1+Math.random()*.12)*(.6+.4*m),tk+.002);dg.gain.exponentialRampToValueAtTime(.0001,tk+.03);tk+=.035+Math.random()*.05}
-    s3.connect(hp);hp.connect(dg);dg.connect(o);
-    // 5) 낮게 깔리는 울림
-    const s4=noiseSrc(t,.5),lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=260;
-    const lg=ac.createGain();lg.gain.setValueAtTime(.0001,t);lg.gain.linearRampToValueAtTime(.45,t+.01);lg.gain.exponentialRampToValueAtTime(.0001,t+.45);
-    s4.connect(lp);lp.connect(lg);lg.connect(o);
+    // 낮은 울림
+    const s3=noiseSrc(t,.35),f3=ac.createBiquadFilter();f3.type='lowpass';f3.frequency.value=220;
+    const g3=ac.createGain();g3.gain.setValueAtTime(.0001,t);g3.gain.linearRampToValueAtTime(.3,t+.01);g3.gain.exponentialRampToValueAtTime(.0001,t+.3);
+    s3.connect(f3);f3.connect(g3);g3.connect(o);
     send(panOut(o,pan),.2);
   }
 
@@ -1710,7 +1726,7 @@ function offLoop(t){
   g.fillStyle='#ffd21f';g.strokeStyle='#a88700';g.lineWidth=5;g.beginPath();g.arc(x0+18,Y,18,0,6.3);g.fill();g.stroke();
   g.strokeStyle='#a88700';g.lineWidth=3;g.beginPath();g.arc(x0+18,Y,9,0,6.3);g.stroke();
   g.lineWidth=7;g.lineJoin='round';g.strokeStyle='rgba(0,0,0,.85)';g.strokeText(txt,x0+50,Y+2);g.fillStyle='#fff';g.fillText(txt,x0+50,Y+2);
-  offCars.forEach(c=>{offPos(c.u);g.save();g.translate(PX,PY);g.rotate(PA+(c.wa||0)*Math.sin((c.wt||0)*22));g.scale(1.7,1.7);drawCar(g,c.l);g.restore()});
+  offCars.forEach(c=>{offPos(c.u);g.save();g.translate(PX,PY);g.rotate(PA+(c.wa||0)*Math.sin((c.wt||0)*22));g.scale(1.7,1.7);if(c.s>.25)drawFlame(g,c.l,c.s);drawCar(g,c.l);if(c.s>.03)drawTint(g,c.l,c.s);g.restore()});
 }
 $('#offcv').onclick=e=>{
   const r=e.currentTarget.getBoundingClientRect(),k=560/r.width,mx=(e.clientX-r.left)*k,my=(e.clientY-r.top)*k;
